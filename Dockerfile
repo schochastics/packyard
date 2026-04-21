@@ -4,7 +4,7 @@
 # Final image is distroless/static — pure Go binary, no shell, no apk/apt.
 
 # ---- build stage ----
-FROM golang:1.22-alpine AS build
+FROM golang:1.25-alpine AS build
 
 # git is only needed to resolve git describe during the build, and ca-certificates
 # so go get/mod can speak TLS. Everything else we need is in the base image.
