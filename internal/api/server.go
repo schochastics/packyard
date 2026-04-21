@@ -40,6 +40,7 @@ func NewMux(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handleHealth(deps))
+	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}", handlePublish(deps))
 
 	return chain(mux,
 		requestIDMiddleware,
