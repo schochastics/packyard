@@ -12,14 +12,16 @@ import (
 	"time"
 
 	"github.com/schochastics/pakman/internal/auth"
+	"github.com/schochastics/pakman/internal/config"
 	"github.com/schochastics/pakman/internal/db"
 )
 
 // Deps bundles everything the UI handlers need.
 type Deps struct {
 	DB            *db.DB
-	SessionKey    []byte // HMAC key for the session cookie; must be non-empty
-	SecureCookies bool   // set Secure flag on Set-Cookie (production)
+	Matrix        *config.MatrixConfig // optional; /ui/cells renders empty if nil
+	SessionKey    []byte               // HMAC key for the session cookie; must be non-empty
+	SecureCookies bool                 // set Secure flag on Set-Cookie (production)
 }
 
 // Handler is the pakman UI handler. Expected mount point is /ui/ on the
@@ -56,6 +58,8 @@ func NewHandler(deps Deps) (*Handler, error) {
 	mux.HandleFunc("POST /logout", h.handleLogout)
 	mux.HandleFunc("GET /channels/{name}", h.handleChannelDetail)
 	mux.HandleFunc("GET /events", h.handleEvents)
+	mux.HandleFunc("GET /cells", h.handleCells)
+	mux.HandleFunc("GET /storage", h.handleStorage)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 	h.mux = mux
 
@@ -75,6 +79,7 @@ func parseTemplates() (*template.Template, error) {
 		"fmtTime":    fmtTime,
 		"fmtBytes":   fmtBytes,
 		"add":        func(a, b int) int { return a + b },
+		"add64":      func(a, b int64) int64 { return a + b },
 		"pagerQuery": pagerQuery,
 	}).ParseFS(templatesFS, "templates/*.html")
 }
@@ -259,6 +264,46 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		Data *eventsPageData
 	}{
 		viewData: viewData{Title: "Events", Identity: &id},
+		Data:     data,
+	})
+}
+
+func (h *Handler) handleCells(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.sessionIdentity(r)
+	if !ok {
+		redirectLogin(w, r)
+		return
+	}
+	data, err := loadCellsPage(r.Context(), h.deps.DB.DB, h.deps.Matrix)
+	if err != nil {
+		h.renderError(w, r, err)
+		return
+	}
+	h.renderPage(w, r, "cells.html", struct {
+		viewData
+		Data *cellsPageData
+	}{
+		viewData: viewData{Title: "Cells", Identity: &id},
+		Data:     data,
+	})
+}
+
+func (h *Handler) handleStorage(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.sessionIdentity(r)
+	if !ok {
+		redirectLogin(w, r)
+		return
+	}
+	data, err := loadStoragePage(r.Context(), h.deps.DB.DB)
+	if err != nil {
+		h.renderError(w, r, err)
+		return
+	}
+	h.renderPage(w, r, "storage.html", struct {
+		viewData
+		Data *storagePageData
+	}{
+		viewData: viewData{Title: "Storage", Identity: &id},
 		Data:     data,
 	})
 }

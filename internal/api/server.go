@@ -99,6 +99,7 @@ func NewMux(deps Deps) http.Handler {
 	if len(deps.UISessionKey) > 0 {
 		uiHandler, err := ui.NewHandler(ui.Deps{
 			DB:            deps.DB,
+			Matrix:        deps.Matrix,
 			SessionKey:    deps.UISessionKey,
 			SecureCookies: deps.UISecureCookies,
 		})

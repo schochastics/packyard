@@ -1,0 +1,43 @@
+{{define "content"}}
+<h1>Cells</h1>
+<p class="muted">
+  Build matrix declared in <code>matrix.yaml</code>.
+  Coverage is how many of the {{.Data.TotalPkgs}} package{{if ne .Data.TotalPkgs 1}}s{{end}} have a binary for this cell.
+</p>
+
+{{if .Data.DeclaredSet}}
+  {{if .Data.Rows}}
+  <table class="events">
+    <thead>
+      <tr>
+        <th>Cell</th><th>OS</th><th>Arch</th><th>R</th>
+        <th>Binaries</th><th>Coverage</th><th>Size</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Data.Rows}}
+      <tr>
+        <td><code>{{.Name}}</code></td>
+        <td>{{.OS}} {{.OSVersion}}</td>
+        <td>{{.Arch}}</td>
+        <td>{{.RMinor}}</td>
+        <td>{{.BinaryCount}}</td>
+        <td>
+          {{if gt $.Data.TotalPkgs 0}}
+            {{.DistinctPkgs}} / {{$.Data.TotalPkgs}}
+          {{else}}
+            <span class="muted">—</span>
+          {{end}}
+        </td>
+        <td class="muted">{{fmtBytes .SizeBytes}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="placeholder">matrix.yaml contains no cells.</p>
+  {{end}}
+{{else}}
+<p class="placeholder">Matrix not loaded. Check server logs.</p>
+{{end}}
+{{end}}

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/schochastics/pakman/internal/auth"
+	"github.com/schochastics/pakman/internal/config"
 	"github.com/schochastics/pakman/internal/db"
 )
 
@@ -464,6 +465,114 @@ func TestEventsPageRendersWithFiltersAndPagination(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "evt-publish") {
 		t.Errorf("type=yank filter should not show publish events")
+	}
+}
+
+func TestCellsPageShowsMatrixAndCoverage(t *testing.T) {
+	h, database := newTestHandler(t)
+	h.deps.Matrix = &config.MatrixConfig{
+		Cells: []config.Cell{
+			{Name: "linux-deb12-amd64-R44", OS: "debian", OSVersion: "12", Arch: "amd64", RMinor: "4.4"},
+			{Name: "linux-u2404-amd64-R44", OS: "ubuntu", OSVersion: "24.04", Arch: "amd64", RMinor: "4.4"},
+		},
+	}
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	value := signSessionCookie(tok, h.deps.SessionKey)
+
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO channels(name, overwrite_policy) VALUES ('dev', 'mutable')`,
+	); err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	res, err := database.ExecContext(ctx,
+		`INSERT INTO packages(channel, name, version, source_sha256, source_size)
+		 VALUES ('dev', 'foo', '1.0.0', 'abc', 1024)`,
+	)
+	if err != nil {
+		t.Fatalf("seed package: %v", err)
+	}
+	pkgID, _ := res.LastInsertId()
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO binaries(package_id, cell, binary_sha256, size)
+		 VALUES (?, 'linux-deb12-amd64-R44', 'aaa', 2048)`, pkgID,
+	); err != nil {
+		t.Fatalf("seed binary: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/cells", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body:\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"linux-deb12-amd64-R44", "linux-u2404-amd64-R44", "1 / 1", "debian", "ubuntu"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+}
+
+func TestCellsPageNoMatrix(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	value := signSessionCookie(tok, h.deps.SessionKey)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/cells", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Matrix not loaded") {
+		t.Errorf("expected placeholder when Matrix is nil")
+	}
+}
+
+func TestStoragePageRenders(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	value := signSessionCookie(tok, h.deps.SessionKey)
+
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO channels(name, overwrite_policy) VALUES ('dev', 'mutable')`,
+	); err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	res, err := database.ExecContext(ctx,
+		`INSERT INTO packages(channel, name, version, source_sha256, source_size)
+		 VALUES ('dev', 'foo', '1.0.0', 'abc', 4096)`,
+	)
+	if err != nil {
+		t.Fatalf("seed package: %v", err)
+	}
+	pkgID, _ := res.LastInsertId()
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO binaries(package_id, cell, binary_sha256, size)
+		 VALUES (?, 'linux', 'aaa', 2048)`, pkgID,
+	); err != nil {
+		t.Fatalf("seed binary: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/storage", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body:\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Storage", "6 KiB", "dev", "foo", "1.0.0"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
 	}
 }
 

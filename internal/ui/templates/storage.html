@@ -1,0 +1,66 @@
+{{define "content"}}
+<h1>Storage</h1>
+<p class="muted">
+  Logical sizes from the DB. Physical CAS on-disk usage (including
+  dedup savings) will land with admin gc in a later release.
+</p>
+
+<section class="totals">
+  <div class="total"><span class="num">{{fmtBytes .Data.TotalBytes}}</span><span class="lbl">total</span></div>
+  <div class="total"><span class="num">{{fmtBytes .Data.SourceBytes}}</span><span class="lbl">{{.Data.SourceCount}} source tarballs</span></div>
+  <div class="total"><span class="num">{{fmtBytes .Data.BinaryBytes}}</span><span class="lbl">{{.Data.BinaryCount}} binary tarballs</span></div>
+</section>
+
+<h2>By channel</h2>
+{{if .Data.ByChannel}}
+<table class="events">
+  <thead>
+    <tr><th>Channel</th><th>Packages</th><th>Source</th><th>Binaries</th><th>Total</th></tr>
+  </thead>
+  <tbody>
+    {{range .Data.ByChannel}}
+    <tr>
+      <td><a href="/ui/channels/{{.Channel}}">{{.Channel}}</a></td>
+      <td>{{.PkgCount}}</td>
+      <td class="muted">{{fmtBytes .SourceBytes}}</td>
+      <td class="muted">{{fmtBytes .BinaryBytes}}</td>
+      <td>{{fmtBytes (add64 .SourceBytes .BinaryBytes)}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="placeholder">No packages published yet.</p>
+{{end}}
+
+<h2>Largest source tarballs</h2>
+{{if .Data.TopSource}}
+<table class="events">
+  <thead><tr><th>Channel</th><th>Package</th><th>Version</th><th>Size</th></tr></thead>
+  <tbody>
+    {{range .Data.TopSource}}
+    <tr>
+      <td>{{.Channel}}</td><td><code>{{.Name}}</code></td>
+      <td><code>{{.Version}}</code></td><td>{{fmtBytes .Size}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}<p class="placeholder">No source tarballs yet.</p>{{end}}
+
+<h2>Largest binary tarballs</h2>
+{{if .Data.TopBinary}}
+<table class="events">
+  <thead><tr><th>Channel</th><th>Package</th><th>Version</th><th>Cell</th><th>Size</th></tr></thead>
+  <tbody>
+    {{range .Data.TopBinary}}
+    <tr>
+      <td>{{.Channel}}</td><td><code>{{.Name}}</code></td>
+      <td><code>{{.Version}}</code></td><td><code>{{.Cell}}</code></td>
+      <td>{{fmtBytes .Size}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}<p class="placeholder">No binary tarballs yet.</p>{{end}}
+{{end}}
