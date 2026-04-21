@@ -30,6 +30,41 @@ Users point their R installations at both pakman (for internal packages) and ups
 
 Not targeted: enterprises with an existing Posit relationship, individual users (use [drat](https://github.com/eddelbuettel/drat) or [r-universe](https://r-universe.dev/)), teams fine with `install_github` from a private repo.
 
+## Quickstart (pre-v1)
+
+Phase A is shipped: publish/yank/delete, CRAN-protocol source+binary reads, admin-token CRUD, and the default-channel alias. The full quickstart below runs against a locally-built binary.
+
+```bash
+# Build the binary
+make build
+
+# Bootstrap a data dir: SQLite + CAS + default channels.yaml / matrix.yaml
+./pakman-server -init -data ./data
+
+# Mint an admin token (printed once to stdout)
+ADMIN=$(./pakman-server -mint-token -scopes admin -label bootstrap -data ./data)
+
+# Start the server (graceful shutdown on SIGINT/SIGTERM)
+./pakman-server -data ./data &
+
+# Mint a publish token via the admin API
+PUB=$(curl -s -X POST http://localhost:8080/api/v1/admin/tokens \
+  -H "Authorization: Bearer $ADMIN" \
+  -H "Content-Type: application/json" \
+  -d '{"label":"ci","scopes":["publish:*","read:*"]}' \
+  | jq -r .token)
+
+# Publish a source tarball
+curl -X POST http://localhost:8080/api/v1/packages/prod/mypkg/1.0.0 \
+  -H "Authorization: Bearer $PUB" \
+  -F 'manifest={"source":"source"};type=application/json' \
+  -F "source=@/path/to/mypkg_1.0.0.tar.gz"
+
+# From R (with a bearer-aware transport, or with allow_anonymous_reads on the default channel):
+#   options(repos = "http://localhost:8080/")
+#   install.packages("mypkg")
+```
+
 ## Documentation
 
 - [design.md](design.md) — architecture and v1 scope.
