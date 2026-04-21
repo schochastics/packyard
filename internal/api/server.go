@@ -63,6 +63,11 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/cells", handleListCells(deps))
 	mux.HandleFunc("GET /api/v1/events", handleListEvents(deps))
 
+	// OpenAPI spec. No auth: the contract is public so SDK generators
+	// can pull it.
+	mux.HandleFunc("GET /api/v1/openapi.json", handleOpenAPIJSON(deps))
+	mux.HandleFunc("GET /api/v1/openapi.yaml", handleOpenAPIYAML(deps))
+
 	// CRAN-protocol source surface. {channel} is the first path segment
 	// so `repos = "http://pakman/<channel>"` Just Works with vanilla R —
 	// R's contrib.url() appends "/src/contrib/PACKAGES" on its own.

@@ -1,4 +1,4 @@
-.PHONY: all build test fmt vet lint check clean help
+.PHONY: all build test fmt vet lint openapi-lint check clean help
 
 BIN          := pakman-server
 CMD_DIR      := ./cmd/pakman-server
@@ -27,7 +27,14 @@ lint: ## Run golangci-lint (installs if missing)
 	}
 	golangci-lint run ./...
 
-check: vet lint test ## Run vet, lint, and tests
+openapi-lint: ## Lint openapi/openapi.yaml with vacuum (installs if missing)
+	@command -v vacuum >/dev/null 2>&1 || { \
+		echo "installing vacuum..."; \
+		go install github.com/daveshanley/vacuum@latest; \
+	}
+	vacuum lint --details --errors openapi/openapi.yaml
+
+check: vet lint test openapi-lint ## Run vet, lint, tests, and openapi-lint
 
 clean: ## Remove build artefacts
 	rm -f $(BIN)

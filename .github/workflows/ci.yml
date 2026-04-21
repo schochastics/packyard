@@ -53,10 +53,32 @@ jobs:
           version: latest
           args: --timeout=3m
 
+  openapi-lint:
+    name: OpenAPI lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: Install vacuum
+        run: go install github.com/daveshanley/vacuum@latest
+
+      # Run in errors-only mode: stylistic warnings (missing examples,
+      # snake_case properties, etc.) are tracked separately and don't
+      # gate PRs. Errors gate.
+      - name: Lint OpenAPI spec
+        run: vacuum lint --errors openapi/openapi.yaml
+
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [test, lint]
+    needs: [test, lint, openapi-lint]
     steps:
       - uses: actions/checkout@v4
 
