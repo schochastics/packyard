@@ -59,6 +59,7 @@ func NewMux(deps Deps) http.Handler {
 	// JSON read surface. All admin-gated for v1; see individual
 	// handlers for the rationale / future loosening notes.
 	mux.HandleFunc("GET /api/v1/channels", handleListChannels(deps))
+	mux.HandleFunc("GET /api/v1/packages", handleListPackages(deps))
 
 	// CRAN-protocol source surface. {channel} is the first path segment
 	// so `repos = "http://pakman/<channel>"` Just Works with vanilla R —
