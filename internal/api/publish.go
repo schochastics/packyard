@@ -165,6 +165,13 @@ func handlePublish(deps Deps) http.HandlerFunc {
 			return
 		}
 
+		// New content means the cached PACKAGES is stale. Idempotent
+		// replays leave state unchanged, so we skip invalidation on
+		// AlreadyExisted to avoid needless churn on replay floods.
+		if !resp.AlreadyExisted && deps.Index != nil {
+			deps.Index.InvalidateChannel(channel)
+		}
+
 		status := http.StatusCreated
 		if resp.AlreadyExisted {
 			status = http.StatusOK

@@ -58,6 +58,9 @@ func handleYank(deps Deps) http.HandlerFunc {
 			herr.write(w, r)
 			return
 		}
+		if deps.Index != nil {
+			deps.Index.InvalidateChannel(channel)
+		}
 		writeJSON(w, r, http.StatusOK, resp)
 	}
 }

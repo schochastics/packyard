@@ -49,6 +49,13 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}/yank", handleYank(deps))
 	mux.HandleFunc("DELETE /api/v1/packages/{channel}/{name}/{version}", handleDelete(deps))
 
+	// CRAN-protocol source surface. {channel} is the first path segment
+	// so `repos = "http://pakman/<channel>"` Just Works with vanilla R —
+	// R's contrib.url() appends "/src/contrib/PACKAGES" on its own.
+	mux.HandleFunc("GET /{channel}/src/contrib/PACKAGES", handleSourcePackages(deps))
+	mux.HandleFunc("GET /{channel}/src/contrib/PACKAGES.gz", handleSourcePackagesGz(deps))
+	mux.HandleFunc("GET /{channel}/src/contrib/{file}", handleSourceTarball(deps))
+
 	return chain(mux,
 		requestIDMiddleware,
 		accessLogMiddleware,
