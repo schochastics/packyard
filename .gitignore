@@ -28,3 +28,5 @@
 # Data dir (local testing)
 /data/
 /_dev/
+
+.admin
