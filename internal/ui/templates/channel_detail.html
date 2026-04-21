@@ -1,0 +1,48 @@
+{{define "content"}}
+<p class="crumbs"><a href="/ui/">Overview</a> / channels / <strong>{{.Data.Meta.Name}}</strong></p>
+
+<h1>{{.Data.Meta.Name}}
+  {{if .Data.Meta.IsDefault}}<span class="tag tag-default">default</span>{{end}}
+  <span class="tag tag-{{.Data.Meta.OverwritePolicy}}">{{.Data.Meta.OverwritePolicy}}</span>
+</h1>
+
+<section class="totals">
+  <div class="total"><span class="num">{{.Data.Meta.PackageCount}}</span><span class="lbl">packages</span></div>
+  <div class="total"><span class="num">{{fmtBytes .Data.Meta.TotalSourceSize}}</span><span class="lbl">source size</span></div>
+  <div class="total"><span class="num">{{fmtTime .Data.Meta.CreatedAt}}</span><span class="lbl">created</span></div>
+</section>
+
+<h2>Packages</h2>
+{{if .Data.Packages}}
+<table class="events">
+  <thead>
+    <tr>
+      <th>Name</th><th>Version</th><th>Published</th><th>By</th>
+      <th>Source</th><th>Binaries</th><th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Data.Packages}}
+    <tr{{if .Yanked}} class="yanked"{{end}}>
+      <td><code>{{.Name}}</code></td>
+      <td><code>{{.Version}}</code></td>
+      <td class="muted">{{fmtTime .PublishedAt}}</td>
+      <td class="muted">{{if .PublishedBy}}{{.PublishedBy}}{{else}}—{{end}}</td>
+      <td class="muted">{{fmtBytes .SourceSize}}</td>
+      <td>{{.BinaryCount}}</td>
+      <td>
+        {{if .Yanked}}
+          <span class="tag tag-yanked">yanked</span>
+          {{if .YankReason}}<span class="muted"> {{.YankReason}}</span>{{end}}
+        {{else}}
+          <span class="tag tag-ok">live</span>
+        {{end}}
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="placeholder">No packages published to this channel yet.</p>
+{{end}}
+{{end}}

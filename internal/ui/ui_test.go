@@ -327,6 +327,87 @@ func TestLogoutClearsCookie(t *testing.T) {
 	}
 }
 
+func TestChannelDetailRenders(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	value := signSessionCookie(tok, h.deps.SessionKey)
+
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO channels(name, overwrite_policy, is_default) VALUES ('dev', 'mutable', 0)`,
+	); err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO packages(channel, name, version, source_sha256, source_size, published_by, yanked, yank_reason)
+		VALUES ('dev', 'foo', '1.0.0', 'abc', 1024, 'ci-bot', 0, NULL),
+		       ('dev', 'bar', '0.2.1', 'def', 2048, 'ci-bot', 1, 'bad build')
+	`); err != nil {
+		t.Fatalf("seed packages: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/channels/dev", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body:\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"foo", "1.0.0", "bar", "0.2.1", "ci-bot", "yanked", "bad build", "mutable"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+}
+
+func TestChannelDetail404(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	value := signSessionCookie(tok, h.deps.SessionKey)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/channels/nope", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d; want 404", rec.Code)
+	}
+}
+
+func TestChannelDetailRequiresAuth(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/channels/dev", nil)
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/ui/login" {
+		t.Fatalf("want redirect to login; got status=%d loc=%q",
+			rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestFmtBytes(t *testing.T) {
+	cases := []struct {
+		n    int64
+		want string
+	}{
+		{0, "0 B"},
+		{999, "999 B"},
+		{1024, "1 KiB"},
+		{1536, "1.5 KiB"},
+		{1024 * 1024, "1 MiB"},
+		{int64(1024) * 1024 * 1024, "1 GiB"},
+	}
+	for _, c := range cases {
+		if got := fmtBytes(c.n); got != c.want {
+			t.Errorf("fmtBytes(%d) = %q; want %q", c.n, got, c.want)
+		}
+	}
+}
+
 func TestStaticAssetsServed(t *testing.T) {
 	h, _ := newTestHandler(t)
 	rec := httptest.NewRecorder()

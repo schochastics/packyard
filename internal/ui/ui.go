@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"database/sql"
 	"errors"
 	"html/template"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/schochastics/pakman/internal/auth"
@@ -51,6 +53,7 @@ func NewHandler(deps Deps) (*Handler, error) {
 	mux.HandleFunc("GET /login", h.handleLoginForm)
 	mux.HandleFunc("POST /login", h.handleLoginSubmit)
 	mux.HandleFunc("POST /logout", h.handleLogout)
+	mux.HandleFunc("GET /channels/{name}", h.handleChannelDetail)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 	h.mux = mux
 
@@ -67,8 +70,42 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // We parse once at startup; serving pages never allocates a new tree.
 func parseTemplates() (*template.Template, error) {
 	return template.New("").Funcs(template.FuncMap{
-		"fmtTime": fmtTime,
+		"fmtTime":  fmtTime,
+		"fmtBytes": fmtBytes,
 	}).ParseFS(templatesFS, "templates/*.html")
+}
+
+// fmtBytes renders a byte count in the closest IEC unit (KiB, MiB…).
+// Designed for dashboard readability, not machine precision.
+func fmtBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return formatInt(n) + " B"
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	if exp >= len(units) {
+		exp = len(units) - 1
+	}
+	// One decimal place; trim trailing .0 for whole numbers.
+	v := float64(n) / float64(div)
+	if v == float64(int(v)) {
+		return formatInt(int64(v)) + " " + units[exp]
+	}
+	return trimTrailingZero(formatFloat(v)) + " " + units[exp]
+}
+
+func formatInt(n int64) string     { return strconv.FormatInt(n, 10) }
+func formatFloat(f float64) string { return strconv.FormatFloat(f, 'f', 1, 64) }
+func trimTrailingZero(s string) string {
+	if len(s) > 2 && s[len(s)-2:] == ".0" {
+		return s[:len(s)-2]
+	}
+	return s
 }
 
 // fmtTime renders an ISO-8601 timestamp in a more human form for the
@@ -145,6 +182,31 @@ func (h *Handler) handleHome(w http.ResponseWriter, r *http.Request) {
 		Data *dashboardData
 	}{
 		viewData: viewData{Title: "Overview", Identity: &id},
+		Data:     data,
+	})
+}
+
+func (h *Handler) handleChannelDetail(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.sessionIdentity(r)
+	if !ok {
+		redirectLogin(w, r)
+		return
+	}
+	name := r.PathValue("name")
+	data, err := loadChannelDetail(r.Context(), h.deps.DB.DB, name)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.NotFound(w, r)
+			return
+		}
+		h.renderError(w, r, err)
+		return
+	}
+	h.renderPage(w, r, "channel_detail.html", struct {
+		viewData
+		Data *channelDetailData
+	}{
+		viewData: viewData{Title: "Channel " + name, Identity: &id},
 		Data:     data,
 	})
 }

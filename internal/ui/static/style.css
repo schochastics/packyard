@@ -224,6 +224,18 @@ h2 {
 .tag-default   { background: #e9f3ff; color: #1d4478; }
 .tag-mutable   { background: #fff3df; color: #6a4a12; }
 .tag-immutable { background: #eefbe9; color: #24611c; }
+.tag-yanked    { background: #fdecea; color: #7a1e1e; }
+.tag-ok        { background: #eefbe9; color: #24611c; }
+
+.crumbs {
+  color: #777;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+.crumbs a { color: #1a2533; text-decoration: none; }
+.crumbs a:hover { text-decoration: underline; }
+
+tr.yanked code { color: #888; text-decoration: line-through; }
 
 /* Events table. */
 .events {

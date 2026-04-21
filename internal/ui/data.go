@@ -112,6 +112,95 @@ func loadChannelCards(ctx context.Context, d *sql.DB) ([]channelCard, error) {
 	return out, rows.Err()
 }
 
+// channelDetailData backs /ui/channels/{name}. Meta is the channel row
+// itself; Packages is one row per (name, version) with a precomputed
+// binary count so the template doesn't need another query per package.
+type channelDetailData struct {
+	Meta     channelMeta
+	Packages []packageRow
+}
+
+type channelMeta struct {
+	Name            string
+	OverwritePolicy string
+	IsDefault       bool
+	CreatedAt       string
+	PackageCount    int64
+	TotalSourceSize int64
+}
+
+type packageRow struct {
+	ID           int64
+	Name         string
+	Version      string
+	SourceSHA256 string
+	SourceSize   int64
+	PublishedAt  string
+	PublishedBy  string
+	Yanked       bool
+	YankReason   string
+	BinaryCount  int64
+}
+
+// loadChannelDetail returns ErrNoRows when the channel doesn't exist,
+// letting the handler render a 404.
+func loadChannelDetail(ctx context.Context, d *sql.DB, name string) (*channelDetailData, error) {
+	meta := channelMeta{Name: name}
+	var isDefault int
+	err := d.QueryRowContext(ctx, `
+		SELECT overwrite_policy, is_default, created_at
+		FROM channels WHERE name = ?
+	`, name).Scan(&meta.OverwritePolicy, &isDefault, &meta.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	meta.IsDefault = isDefault == 1
+
+	// Totals alongside the detail rows: kept separate so a channel with
+	// thousands of packages doesn't pay to recount per row.
+	if err := d.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(SUM(source_size), 0)
+		FROM packages WHERE channel = ?
+	`, name).Scan(&meta.PackageCount, &meta.TotalSourceSize); err != nil {
+		return nil, err
+	}
+
+	rows, err := d.QueryContext(ctx, `
+		SELECT p.id, p.name, p.version, p.source_sha256, p.source_size,
+		       p.published_at,
+		       COALESCE(p.published_by, ''),
+		       p.yanked,
+		       COALESCE(p.yank_reason, ''),
+		       (SELECT COUNT(*) FROM binaries b WHERE b.package_id = p.id) AS binary_count
+		FROM packages p
+		WHERE p.channel = ?
+		ORDER BY p.name, p.published_at DESC
+	`, name)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	pkgs := []packageRow{}
+	for rows.Next() {
+		var (
+			p      packageRow
+			yanked int
+		)
+		if err := rows.Scan(&p.ID, &p.Name, &p.Version, &p.SourceSHA256, &p.SourceSize,
+			&p.PublishedAt, &p.PublishedBy, &yanked, &p.YankReason, &p.BinaryCount); err != nil {
+			return nil, err
+		}
+		p.Yanked = yanked == 1
+		pkgs = append(pkgs, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return &channelDetailData{Meta: meta, Packages: pkgs}, nil
+}
+
 // loadRecentEvents returns the N newest events in reverse-chronological
 // order (newest first). Uses id DESC rather than at DESC since id is
 // AUTOINCREMENT and therefore monotonic — at can collide at the
