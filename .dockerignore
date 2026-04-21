@@ -1,0 +1,29 @@
+# Version-control metadata (not needed for build)
+.git
+.github
+.gitea
+
+# Editor / OS
+.idea
+.vscode
+.DS_Store
+
+# Build outputs
+/pakman-server
+/dist
+/bin
+
+# Docs / design (huge, irrelevant to the build)
+*.md
+research.md
+design.md
+implementation.md
+
+# Tests' transient data
+/data
+/_dev
+
+# CI-only configs
+.golangci.yaml
+.goreleaser.yaml
+Makefile
