@@ -61,6 +61,7 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/channels", handleListChannels(deps))
 	mux.HandleFunc("GET /api/v1/packages", handleListPackages(deps))
 	mux.HandleFunc("GET /api/v1/cells", handleListCells(deps))
+	mux.HandleFunc("GET /api/v1/events", handleListEvents(deps))
 
 	// CRAN-protocol source surface. {channel} is the first path segment
 	// so `repos = "http://pakman/<channel>"` Just Works with vanilla R —
