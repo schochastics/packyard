@@ -56,6 +56,10 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/admin/tokens", handleListTokens(deps))
 	mux.HandleFunc("DELETE /api/v1/admin/tokens/{id}", handleRevokeToken(deps))
 
+	// JSON read surface. All admin-gated for v1; see individual
+	// handlers for the rationale / future loosening notes.
+	mux.HandleFunc("GET /api/v1/channels", handleListChannels(deps))
+
 	// CRAN-protocol source surface. {channel} is the first path segment
 	// so `repos = "http://pakman/<channel>"` Just Works with vanilla R —
 	// R's contrib.url() appends "/src/contrib/PACKAGES" on its own.
