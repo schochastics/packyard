@@ -41,6 +41,8 @@ func NewMux(deps Deps) http.Handler {
 
 	mux.HandleFunc("GET /health", handleHealth(deps))
 	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}", handlePublish(deps))
+	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}/yank", handleYank(deps))
+	mux.HandleFunc("DELETE /api/v1/packages/{channel}/{name}/{version}", handleDelete(deps))
 
 	return chain(mux,
 		requestIDMiddleware,

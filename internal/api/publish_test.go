@@ -92,7 +92,7 @@ cells:
 	}
 	_, err = database.ExecContext(ctx, `
 		INSERT INTO tokens(token_sha256, scopes_csv, label) VALUES (?, ?, ?)
-	`, auth.HashToken(plaintext), "publish:*,read:*,admin", "tests")
+	`, auth.HashToken(plaintext), "publish:*,yank:*,read:*,admin", "tests")
 	if err != nil {
 		t.Fatalf("insert token: %v", err)
 	}
