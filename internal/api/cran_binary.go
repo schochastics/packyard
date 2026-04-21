@@ -13,19 +13,7 @@ import (
 // Only rows that have a binary for the cell appear.
 func handleBinaryPackages(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		channel := r.PathValue("channel")
-		cell := r.PathValue("cell")
-		if !requireReadScope(w, r, deps, channel) {
-			return
-		}
-		body, herr := loadBinaryPackages(r.Context(), deps, channel, cell)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-		_, _ = w.Write(body)
+		serveBinaryPackages(w, r, deps, r.PathValue("channel"), r.PathValue("cell"), false)
 	}
 }
 
@@ -33,25 +21,7 @@ func handleBinaryPackages(deps Deps) http.HandlerFunc {
 // for .gz first.
 func handleBinaryPackagesGz(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		channel := r.PathValue("channel")
-		cell := r.PathValue("cell")
-		if !requireReadScope(w, r, deps, channel) {
-			return
-		}
-		body, herr := loadBinaryPackages(r.Context(), deps, channel, cell)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		gz, err := gzipBytes(body)
-		if err != nil {
-			writeError(w, r, http.StatusInternalServerError,
-				CodeInternal, "gzip: "+err.Error(), "")
-			return
-		}
-		w.Header().Set("Content-Type", "application/gzip")
-		w.Header().Set("Content-Length", strconv.Itoa(len(gz)))
-		_, _ = w.Write(gz)
+		serveBinaryPackages(w, r, deps, r.PathValue("channel"), r.PathValue("cell"), true)
 	}
 }
 
@@ -62,29 +32,88 @@ func handleBinaryPackagesGz(deps Deps) http.HandlerFunc {
 // source to keep URL patterns predictable.
 func handleBinaryTarball(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		channel := r.PathValue("channel")
-		cell := r.PathValue("cell")
-		file := r.PathValue("file")
+		serveBinaryTarball(w, r, deps, r.PathValue("channel"), r.PathValue("cell"), r.PathValue("file"))
+	}
+}
 
-		if !requireReadScope(w, r, deps, channel) {
-			return
-		}
-
-		name, version, ok := parseSourceTarballFilename(file)
-		if !ok {
-			writeError(w, r, http.StatusNotFound,
-				CodeNotFound, "unknown resource",
-				"binary tarballs are named <Package>_<Version>.tar.gz")
-			return
-		}
-
-		sum, size, herr := lookupBinaryBlob(r.Context(), deps.DB.DB, channel, name, version, cell)
+// handleDefaultBinaryPackages / ...Gz / ...Tarball serve the alias
+// routes under /bin/linux/{cell}/... — no channel in the URL.
+func handleDefaultBinaryPackages(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
 		if herr != nil {
 			herr.write(w, r)
 			return
 		}
-		serveBlob(w, r, deps, sum, size, "application/x-gzip")
+		serveBinaryPackages(w, r, deps, ch, r.PathValue("cell"), false)
 	}
+}
+
+func handleDefaultBinaryPackagesGz(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
+		if herr != nil {
+			herr.write(w, r)
+			return
+		}
+		serveBinaryPackages(w, r, deps, ch, r.PathValue("cell"), true)
+	}
+}
+
+func handleDefaultBinaryTarball(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
+		if herr != nil {
+			herr.write(w, r)
+			return
+		}
+		serveBinaryTarball(w, r, deps, ch, r.PathValue("cell"), r.PathValue("file"))
+	}
+}
+
+func serveBinaryPackages(w http.ResponseWriter, r *http.Request, deps Deps, channel, cell string, gzipped bool) {
+	if !requireReadScope(w, r, deps, channel) {
+		return
+	}
+	body, herr := loadBinaryPackages(r.Context(), deps, channel, cell)
+	if herr != nil {
+		herr.write(w, r)
+		return
+	}
+	if gzipped {
+		gz, err := gzipBytes(body)
+		if err != nil {
+			writeError(w, r, http.StatusInternalServerError,
+				CodeInternal, "gzip: "+err.Error(), "")
+			return
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Length", strconv.Itoa(len(gz)))
+		_, _ = w.Write(gz)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	_, _ = w.Write(body)
+}
+
+func serveBinaryTarball(w http.ResponseWriter, r *http.Request, deps Deps, channel, cell, file string) {
+	if !requireReadScope(w, r, deps, channel) {
+		return
+	}
+	name, version, ok := parseSourceTarballFilename(file)
+	if !ok {
+		writeError(w, r, http.StatusNotFound,
+			CodeNotFound, "unknown resource",
+			"binary tarballs are named <Package>_<Version>.tar.gz")
+		return
+	}
+	sum, size, herr := lookupBinaryBlob(r.Context(), deps.DB.DB, channel, name, version, cell)
+	if herr != nil {
+		herr.write(w, r)
+		return
+	}
+	serveBlob(w, r, deps, sum, size, "application/x-gzip")
 }
 
 // lookupBinaryBlob fetches the binary sha256/size for a (channel, name,

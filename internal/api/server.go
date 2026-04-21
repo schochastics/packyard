@@ -63,6 +63,15 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/PACKAGES.gz", handleBinaryPackagesGz(deps))
 	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/{file}", handleBinaryTarball(deps))
 
+	// Default-channel aliases: `repos = "http://pakman/"` works the
+	// same as naming the default channel explicitly.
+	mux.HandleFunc("GET /src/contrib/PACKAGES", handleDefaultSourcePackages(deps))
+	mux.HandleFunc("GET /src/contrib/PACKAGES.gz", handleDefaultSourcePackagesGz(deps))
+	mux.HandleFunc("GET /src/contrib/{file}", handleDefaultSourceTarball(deps))
+	mux.HandleFunc("GET /bin/linux/{cell}/PACKAGES", handleDefaultBinaryPackages(deps))
+	mux.HandleFunc("GET /bin/linux/{cell}/PACKAGES.gz", handleDefaultBinaryPackagesGz(deps))
+	mux.HandleFunc("GET /bin/linux/{cell}/{file}", handleDefaultBinaryTarball(deps))
+
 	return chain(mux,
 		requestIDMiddleware,
 		accessLogMiddleware,

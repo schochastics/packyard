@@ -19,35 +19,76 @@ import (
 // anonymous reads are enabled and {channel} is the default.
 func handleSourcePackages(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		channel := r.PathValue("channel")
-		if !requireReadScope(w, r, deps, channel) {
-			return
-		}
-		body, herr := loadSourcePackages(r.Context(), deps, channel)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-		_, _ = w.Write(body)
+		serveSourcePackages(w, r, deps, r.PathValue("channel"), false)
 	}
 }
 
-// handleSourcePackagesGz serves the gzipped variant at the PACKAGES.gz
-// URL. Base R asks for .gz first on a CRAN-protocol install; we build
-// gz from the same cached body so a mutation invalidates both views.
+// handleSourcePackagesGz serves the gzipped variant. Base R asks for
+// .gz first on a CRAN-protocol install; we build gz from the same
+// cached body so a mutation invalidates both views.
 func handleSourcePackagesGz(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		channel := r.PathValue("channel")
-		if !requireReadScope(w, r, deps, channel) {
-			return
-		}
-		body, herr := loadSourcePackages(r.Context(), deps, channel)
+		serveSourcePackages(w, r, deps, r.PathValue("channel"), true)
+	}
+}
+
+// handleSourceTarball serves GET /{channel}/src/contrib/{file}.
+func handleSourceTarball(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		serveSourceTarball(w, r, deps, r.PathValue("channel"), r.PathValue("file"))
+	}
+}
+
+// handleDefaultSourcePackages / ...Gz / ...Tarball serve the alias
+// routes under /src/contrib/... — no channel in the URL. We resolve
+// the default from the DB and delegate to the same core logic as the
+// channel-named variants.
+func handleDefaultSourcePackages(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
 		if herr != nil {
 			herr.write(w, r)
 			return
 		}
+		serveSourcePackages(w, r, deps, ch, false)
+	}
+}
+
+func handleDefaultSourcePackagesGz(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
+		if herr != nil {
+			herr.write(w, r)
+			return
+		}
+		serveSourcePackages(w, r, deps, ch, true)
+	}
+}
+
+func handleDefaultSourceTarball(deps Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
+		if herr != nil {
+			herr.write(w, r)
+			return
+		}
+		serveSourceTarball(w, r, deps, ch, r.PathValue("file"))
+	}
+}
+
+// serveSourcePackages is the shared core of the channel-named and
+// default-channel alias PACKAGES handlers. gzip=true switches response
+// type and body to PACKAGES.gz.
+func serveSourcePackages(w http.ResponseWriter, r *http.Request, deps Deps, channel string, gzipped bool) {
+	if !requireReadScope(w, r, deps, channel) {
+		return
+	}
+	body, herr := loadSourcePackages(r.Context(), deps, channel)
+	if herr != nil {
+		herr.write(w, r)
+		return
+	}
+	if gzipped {
 		gz, err := gzipBytes(body)
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError,
@@ -57,36 +98,55 @@ func handleSourcePackagesGz(deps Deps) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("Content-Length", strconv.Itoa(len(gz)))
 		_, _ = w.Write(gz)
+		return
 	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	_, _ = w.Write(body)
 }
 
-// handleSourceTarball serves GET /{channel}/src/contrib/{file}.
-// {file} must match <name>_<version>.tar.gz; anything else 404s so we
-// don't leak information via distinct error codes.
-func handleSourceTarball(deps Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		channel := r.PathValue("channel")
-		file := r.PathValue("file")
-
-		if !requireReadScope(w, r, deps, channel) {
-			return
-		}
-
-		name, version, ok := parseSourceTarballFilename(file)
-		if !ok {
-			writeError(w, r, http.StatusNotFound,
-				CodeNotFound, "unknown resource",
-				"source tarballs are named <Package>_<Version>.tar.gz")
-			return
-		}
-
-		sum, size, herr := lookupSourceBlob(r.Context(), deps.DB.DB, channel, name, version)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		serveBlob(w, r, deps, sum, size, "application/x-gzip")
+// serveSourceTarball is the shared core of the channel-named and
+// default-channel alias tarball handlers.
+func serveSourceTarball(w http.ResponseWriter, r *http.Request, deps Deps, channel, file string) {
+	if !requireReadScope(w, r, deps, channel) {
+		return
 	}
+	name, version, ok := parseSourceTarballFilename(file)
+	if !ok {
+		writeError(w, r, http.StatusNotFound,
+			CodeNotFound, "unknown resource",
+			"source tarballs are named <Package>_<Version>.tar.gz")
+		return
+	}
+	sum, size, herr := lookupSourceBlob(r.Context(), deps.DB.DB, channel, name, version)
+	if herr != nil {
+		herr.write(w, r)
+		return
+	}
+	serveBlob(w, r, deps, sum, size, "application/x-gzip")
+}
+
+// resolveDefaultChannel returns the name of the default channel, or a
+// 500 httpError if the DB is in an impossible state (no row with
+// is_default=1). Validation at config load time ensures exactly one
+// default exists, so reaching the error path here means something
+// tampered with the DB directly.
+func resolveDefaultChannel(ctx context.Context, db *sql.DB) (string, *httpError) {
+	var name string
+	err := db.QueryRowContext(ctx,
+		`SELECT name FROM channels WHERE is_default = 1`).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", &httpError{
+			status: http.StatusInternalServerError,
+			code:   CodeInternal,
+			msg:    "no default channel configured",
+			hint:   "set exactly one channel with default: true in channels.yaml and restart",
+		}
+	}
+	if err != nil {
+		return "", internalErr("default channel lookup", err)
+	}
+	return name, nil
 }
 
 // parseSourceTarballFilename extracts (name, version) from filenames
