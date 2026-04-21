@@ -6,17 +6,19 @@ import (
 	"github.com/schochastics/pakman/internal/cas"
 	"github.com/schochastics/pakman/internal/config"
 	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/pakman/internal/metrics"
 )
 
 // Deps is the set of services API handlers reach for. Assembled once at
 // server startup and passed through NewMux. Handlers hold pointers to
 // the same values — no defensive copies, no hidden state.
 type Deps struct {
-	DB     *db.DB
-	CAS    *cas.Store
-	Matrix *config.MatrixConfig
-	Server *config.ServerConfig
-	Index  *Index // optional; callers may leave nil and NewMux fills it in
+	DB      *db.DB
+	CAS     *cas.Store
+	Matrix  *config.MatrixConfig
+	Server  *config.ServerConfig
+	Index   *Index           // optional; NewMux fills in if nil
+	Metrics *metrics.Metrics // optional; NewMux fills in if nil
 }
 
 // NewMux builds the top-level HTTP handler: the http.ServeMux of
@@ -41,10 +43,14 @@ func NewMux(deps Deps) http.Handler {
 	if deps.Index == nil {
 		deps.Index = NewIndex(deps.DB.DB)
 	}
+	if deps.Metrics == nil {
+		deps.Metrics = metrics.New()
+	}
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handleHealth(deps))
+	mux.Handle("GET /metrics", handleMetrics(deps))
 	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}", handlePublish(deps))
 	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}/yank", handleYank(deps))
 	mux.HandleFunc("DELETE /api/v1/packages/{channel}/{name}/{version}", handleDelete(deps))
@@ -93,6 +99,7 @@ func NewMux(deps Deps) http.Handler {
 
 	return chain(mux,
 		requestIDMiddleware,
+		metricsMiddleware(deps),
 		accessLogMiddleware,
 		recoveryMiddleware,
 		authMiddleware(deps),
