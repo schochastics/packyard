@@ -1,0 +1,90 @@
+# GoReleaser config for pakman.
+# https://goreleaser.com
+#
+# Full release is triggered by pushing a v* tag and a matching workflow in
+# .github/workflows/ (to be added in Phase C, see implementation.md §C5).
+# For v1 we ship Linux amd64 + arm64 as primary; Darwin is best-effort.
+
+version: 2
+
+project_name: pakman
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: pakman-server
+    main: ./cmd/pakman-server
+    binary: pakman-server
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/schochastics/pakman/internal/version.Version={{.Version}}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-dev+{{ .ShortCommit }}"
+
+sboms:
+  - artifacts: archive
+
+changelog:
+  sort: asc
+  use: github
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?:'
+      order: 0
+    - title: Fixes
+      regexp: '^fix(\(.+\))?:'
+      order: 1
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: schochastics
+    name: pakman
+  draft: true
+  prerelease: auto
+  mode: replace
+  header: |
+    ## pakman {{ .Tag }}
+  footer: |
+    ---
+
+    See [implementation.md](implementation.md) for what's shipped in each phase.
