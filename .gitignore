@@ -1,0 +1,30 @@
+# Binaries
+pakman-server
+/dist/
+/bin/
+
+# Go
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/vendor/
+
+# Local dev
+*.log
+.env
+.env.local
+.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Data dir (local testing)
+/data/
+/_dev/
