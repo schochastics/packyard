@@ -383,6 +383,73 @@ components:
         version: { type: string }
         deleted: { type: boolean, enum: [true] }
 
+    # ---- Events --------------------------------------------------------
+    EventSummary:
+      type: object
+      required: [id, at, type]
+      properties:
+        id:
+          type: integer
+          format: int64
+        at:
+          type: string
+          format: date-time
+        type:
+          type: string
+          description: |
+            publish / publish_overwrite / publish_idempotent / yank /
+            delete / token_create / token_revoke. Extend this list with
+            the spec on any new event type.
+        actor:
+          type: string
+          nullable: true
+          description: Token label of the caller that triggered the event.
+        channel:
+          type: string
+          nullable: true
+        package:
+          type: string
+          nullable: true
+        version:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+
+    ListEventsResponse:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/EventSummary' }
+
+    # ---- Cells ---------------------------------------------------------
+    CellSummary:
+      type: object
+      required: [name, os, os_version, arch, r_minor]
+      properties:
+        name: { type: string }
+        os:
+          type: string
+          enum: [linux, darwin, windows]
+        os_version: { type: string }
+        arch:
+          type: string
+          enum: [amd64, arm64, i386]
+        r_minor:
+          type: string
+          pattern: '^\d+\.\d+$'
+
+    ListCellsResponse:
+      type: object
+      required: [cells]
+      properties:
+        cells:
+          type: array
+          items: { $ref: '#/components/schemas/CellSummary' }
+
   parameters:
     ChannelPath:
       name: channel
@@ -712,3 +779,341 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+  # ---- Events --------------------------------------------------------
+  /api/v1/events:
+    get:
+      summary: List events (audit log)
+      description: |
+        Cursor-paginated via `since_id`. Response is ascending id order so
+        `max(events[].id)` becomes the next `since_id`. Admin-gated.
+      operationId: listEvents
+      tags: [meta]
+      parameters:
+        - name: since_id
+          in: query
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 500
+            default: 100
+        - name: channel
+          in: query
+          schema: { type: string }
+        - name: package
+          in: query
+          schema: { type: string }
+        - name: type
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Paginated list.
+          headers:
+            X-Total-Count:
+              schema:
+                type: integer
+                format: int64
+              description: Total matching rows (before the since_id cursor was applied).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListEventsResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---- Cells ---------------------------------------------------------
+  /api/v1/cells:
+    get:
+      summary: List configured build cells
+      description: |
+        Admin-gated in v1; strong candidate for loosening to any-valid-
+        token in Phase C since CI workers legitimately need this list
+        to decide what to build.
+      operationId: listCells
+      tags: [meta]
+      responses:
+        '200':
+          description: Cells as declared in matrix.yaml.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListCellsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---- CRAN-protocol source reads -----------------------------------
+  #
+  # URL shape matches what R's contrib.url() builds from
+  #   options(repos = "http://pakman/<channel>")
+  # so install.packages() "just works". Default-channel aliases (no
+  # /{channel} prefix) route to the is_default=1 channel.
+  #
+  # Scope: read:<channel>. Unauthenticated reads to the default channel
+  # are permitted only when the server's allow_anonymous_reads config
+  # flag is true.
+  /{channel}/src/contrib/PACKAGES:
+    get:
+      summary: Source PACKAGES DCF index
+      operationId: getSourcePackages
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+      responses:
+        '200':
+          description: DCF-formatted PACKAGES body.
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /{channel}/src/contrib/PACKAGES.gz:
+    get:
+      summary: Gzipped source PACKAGES
+      operationId: getSourcePackagesGz
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+      responses:
+        '200':
+          description: gzip-compressed PACKAGES body.
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /{channel}/src/contrib/{file}:
+    get:
+      summary: Download a source tarball
+      description: '{file} must match `<Package>_<Version>.tar.gz`.'
+      operationId: getSourceTarball
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Source tarball bytes.
+          headers:
+            ETag:
+              schema: { type: string }
+              description: '"<sha256>" — content-addressable, safe for caching.'
+          content:
+            application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---- CRAN-protocol binary reads (Linux only) ----------------------
+  /{channel}/bin/linux/{cell}/PACKAGES:
+    get:
+      summary: Binary PACKAGES for a cell
+      operationId: getBinaryPackages
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - name: cell
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: DCF-formatted binary PACKAGES.
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /{channel}/bin/linux/{cell}/PACKAGES.gz:
+    get:
+      summary: Gzipped binary PACKAGES
+      operationId: getBinaryPackagesGz
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - name: cell
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: gzip-compressed binary PACKAGES.
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /{channel}/bin/linux/{cell}/{file}:
+    get:
+      summary: Download a binary tarball
+      operationId: getBinaryTarball
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - name: cell
+          in: path
+          required: true
+          schema: { type: string }
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Binary tarball bytes.
+          content:
+            application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---- Default-channel aliases --------------------------------------
+  # Same semantics as the channel-prefixed routes above but resolve to
+  # the DB-marked default channel. Documented as separate paths because
+  # OpenAPI 3 doesn't support "this channel is optional in the URL".
+  /src/contrib/PACKAGES:
+    get:
+      summary: Source PACKAGES (default channel)
+      operationId: getDefaultSourcePackages
+      tags: [cran]
+      responses:
+        '200':
+          description: DCF-formatted PACKAGES body.
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /src/contrib/PACKAGES.gz:
+    get:
+      summary: Gzipped source PACKAGES (default channel)
+      operationId: getDefaultSourcePackagesGz
+      tags: [cran]
+      responses:
+        '200':
+          description: gzip-compressed PACKAGES body.
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /src/contrib/{file}:
+    get:
+      summary: Download a source tarball (default channel)
+      operationId: getDefaultSourceTarball
+      tags: [cran]
+      parameters:
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Source tarball bytes.
+          content:
+            application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /bin/linux/{cell}/PACKAGES:
+    get:
+      summary: Binary PACKAGES for a cell (default channel)
+      operationId: getDefaultBinaryPackages
+      tags: [cran]
+      parameters:
+        - name: cell
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: DCF-formatted binary PACKAGES.
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /bin/linux/{cell}/PACKAGES.gz:
+    get:
+      summary: Gzipped binary PACKAGES (default channel)
+      operationId: getDefaultBinaryPackagesGz
+      tags: [cran]
+      parameters:
+        - name: cell
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: gzip-compressed binary PACKAGES.
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /bin/linux/{cell}/{file}:
+    get:
+      summary: Download a binary tarball (default channel)
+      operationId: getDefaultBinaryTarball
+      tags: [cran]
+      parameters:
+        - name: cell
+          in: path
+          required: true
+          schema: { type: string }
+        - name: file
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Binary tarball bytes.
+          content:
+            application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
