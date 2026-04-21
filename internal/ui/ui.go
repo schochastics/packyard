@@ -135,9 +135,17 @@ func (h *Handler) handleHome(w http.ResponseWriter, r *http.Request) {
 		redirectLogin(w, r)
 		return
 	}
-	h.renderPage(w, r, "dashboard.html", viewData{
-		Title:    "Overview",
-		Identity: &id,
+	data, err := loadDashboardData(r.Context(), h.deps.DB.DB, 20)
+	if err != nil {
+		h.renderError(w, r, err)
+		return
+	}
+	h.renderPage(w, r, "dashboard.html", struct {
+		viewData
+		Data *dashboardData
+	}{
+		viewData: viewData{Title: "Overview", Identity: &id},
+		Data:     data,
 	})
 }
 

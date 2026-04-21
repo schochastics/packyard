@@ -134,3 +134,138 @@ h1 { margin-top: 0; font-size: 1.7rem; }
   color: #666;
   font-style: italic;
 }
+
+.muted { color: #777; font-size: 0.9rem; }
+
+h2 {
+  font-size: 1.2rem;
+  margin-top: 2rem;
+  border-bottom: 1px solid #e2e2e2;
+  padding-bottom: 0.3rem;
+}
+
+/* Totals row: three big numbers at the top of the dashboard. */
+.totals {
+  display: flex;
+  gap: 1rem;
+  margin: 1rem 0 2rem;
+}
+
+.total {
+  flex: 1;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.total .num {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #1a2533;
+}
+
+.total .lbl {
+  font-size: 0.85rem;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Channel cards grid. */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.card {
+  display: block;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 1rem;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.1s;
+}
+
+.card:hover { border-color: #1a2533; }
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.card-name {
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin-right: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.card-body { font-size: 0.9rem; }
+
+.tag {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tag-default   { background: #e9f3ff; color: #1d4478; }
+.tag-mutable   { background: #fff3df; color: #6a4a12; }
+.tag-immutable { background: #eefbe9; color: #24611c; }
+
+/* Events table. */
+.events {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 1rem;
+}
+
+.events th, .events td {
+  padding: 0.5rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.events th {
+  background: #f4f4f4;
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #555;
+}
+
+.events tr:last-child td { border-bottom: 0; }
+
+/* Event-type badges. Unknown types fall through to the base .evt style. */
+.evt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 3px;
+  background: #eee;
+  color: #333;
+}
+
+.evt-publish      { background: #eefbe9; color: #24611c; }
+.evt-yank         { background: #fff3df; color: #6a4a12; }
+.evt-delete       { background: #fdecea; color: #7a1e1e; }
+.evt-token_create { background: #e9f3ff; color: #1d4478; }
+.evt-token_revoke { background: #f3e9ff; color: #4e1d78; }

@@ -210,6 +210,48 @@ func TestHomeRendersDashboardWhenAuthenticated(t *testing.T) {
 	}
 }
 
+func TestHomeShowsSeededChannelAndEvent(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	value := signSessionCookie(tok, h.deps.SessionKey)
+
+	// Seed a channel, a package (so the card shows "1 package"), and a
+	// publish event (so the activity table has a row).
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO channels(name, overwrite_policy, is_default) VALUES ('dev', 'mutable', 1)`,
+	); err != nil {
+		t.Fatalf("seed channel: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO packages(channel, name, version, source_sha256, source_size)
+		 VALUES ('dev', 'foo', '1.0.0', 'abc', 42)`,
+	); err != nil {
+		t.Fatalf("seed package: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO events(type, actor, channel, package, version)
+		 VALUES ('publish', 'ci', 'dev', 'foo', '1.0.0')`,
+	); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body:\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"dev", "default", "mutable", "foo", "1.0.0", "publish"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+}
+
 func TestLoginFormRedirectsWhenAlreadyAuthenticated(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)

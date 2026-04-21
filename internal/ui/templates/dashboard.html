@@ -1,5 +1,60 @@
 {{define "content"}}
 <h1>Overview</h1>
-<p class="placeholder">Channel cards and recent-events feed land in B4-C2.
-   Welcome, <strong>{{.Identity.Label}}</strong>.</p>
+
+<section class="totals">
+  <div class="total"><span class="num">{{.Data.Totals.Channels}}</span><span class="lbl">channels</span></div>
+  <div class="total"><span class="num">{{.Data.Totals.Packages}}</span><span class="lbl">packages</span></div>
+  <div class="total"><span class="num">{{.Data.Totals.Events}}</span><span class="lbl">events</span></div>
+</section>
+
+<section>
+  <h2>Channels</h2>
+  {{if .Data.Channels}}
+  <div class="cards">
+    {{range .Data.Channels}}
+    <a class="card" href="/ui/channels/{{.Name}}">
+      <div class="card-head">
+        <span class="card-name">{{.Name}}</span>
+        {{if .IsDefault}}<span class="tag tag-default">default</span>{{end}}
+        <span class="tag tag-{{.OverwritePolicy}}">{{.OverwritePolicy}}</span>
+      </div>
+      <div class="card-body">
+        <div><strong>{{.PackageCount}}</strong> package{{if ne .PackageCount 1}}s{{end}}</div>
+        <div class="muted">Latest: {{fmtTime .LatestPublishAt}}</div>
+      </div>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="placeholder">No channels yet. Add one via channels.yaml and restart the server.</p>
+  {{end}}
+</section>
+
+<section>
+  <h2>Recent activity</h2>
+  {{if .Data.RecentEvents}}
+  <table class="events">
+    <thead>
+      <tr>
+        <th>Time</th><th>Type</th><th>Channel</th><th>Package</th><th>Version</th><th>Actor</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .Data.RecentEvents}}
+      <tr>
+        <td class="muted">{{fmtTime .At}}</td>
+        <td><span class="evt evt-{{.Type}}">{{.Type}}</span></td>
+        <td>{{if .Channel}}{{.Channel}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td>{{if .Package}}{{.Package}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td>{{if .Version}}{{.Version}}{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="muted">{{if .Actor}}{{.Actor}}{{else}}—{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  <p class="muted">Showing the {{.Data.RecentLimit}} most recent events. <a href="/ui/events">See all →</a></p>
+  {{else}}
+  <p class="placeholder">No activity yet. Publish a package to see events here.</p>
+  {{end}}
+</section>
 {{end}}
