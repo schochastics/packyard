@@ -1,24 +1,28 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/schochastics/pakman/internal/cas"
 	"github.com/schochastics/pakman/internal/config"
 	"github.com/schochastics/pakman/internal/db"
 	"github.com/schochastics/pakman/internal/metrics"
+	"github.com/schochastics/pakman/internal/ui"
 )
 
 // Deps is the set of services API handlers reach for. Assembled once at
 // server startup and passed through NewMux. Handlers hold pointers to
 // the same values — no defensive copies, no hidden state.
 type Deps struct {
-	DB      *db.DB
-	CAS     *cas.Store
-	Matrix  *config.MatrixConfig
-	Server  *config.ServerConfig
-	Index   *Index           // optional; NewMux fills in if nil
-	Metrics *metrics.Metrics // optional; NewMux fills in if nil
+	DB              *db.DB
+	CAS             *cas.Store
+	Matrix          *config.MatrixConfig
+	Server          *config.ServerConfig
+	Index           *Index           // optional; NewMux fills in if nil
+	Metrics         *metrics.Metrics // optional; NewMux fills in if nil
+	UISessionKey    []byte           // HMAC key for /ui/ session cookies; empty disables the UI
+	UISecureCookies bool             // mark /ui/ cookies Secure (production)
 }
 
 // NewMux builds the top-level HTTP handler: the http.ServeMux of
@@ -87,6 +91,26 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/PACKAGES", handleBinaryPackages(deps))
 	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/PACKAGES.gz", handleBinaryPackagesGz(deps))
 	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/{file}", handleBinaryTarball(deps))
+
+	// Operator dashboard. Mounted under /ui/ so an operator can point a
+	// browser at the same host that serves the API. Disabled when no
+	// session key was supplied — keeps tests and CLI-only deployments
+	// from having to generate a key they won't use.
+	if len(deps.UISessionKey) > 0 {
+		uiHandler, err := ui.NewHandler(ui.Deps{
+			DB:            deps.DB,
+			SessionKey:    deps.UISessionKey,
+			SecureCookies: deps.UISecureCookies,
+		})
+		if err != nil {
+			// Unreachable in practice: only SessionKey emptiness and
+			// template-parse bugs fail here, and we've just gated on the
+			// former. Log loudly and keep serving the API anyway.
+			slog.Default().Error("ui: handler init failed; /ui/ disabled", "err", err)
+		} else {
+			mux.Handle("/ui/", http.StripPrefix("/ui", uiHandler))
+		}
+	}
 
 	// Default-channel aliases: `repos = "http://pakman/"` works the
 	// same as naming the default channel explicitly.
