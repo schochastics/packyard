@@ -90,10 +90,18 @@ components:
       properties:
         status:
           type: string
-          enum: [ok]
+          enum: [ok, degraded]
         version:
           type: string
           description: Build version string (from the version.Version ldflag).
+        subsystems:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Per-subsystem state — "ok" on success, a short error string
+            otherwise. Current subsystems: db, cas, matrix. More may be
+            added without a breaking change since the map is open.
 
     # ---- Admin tokens --------------------------------------------------
     CreateTokenRequest:
