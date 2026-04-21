@@ -109,7 +109,22 @@ func NewMux(deps Deps) http.Handler {
 			// former. Log loudly and keep serving the API anyway.
 			slog.Default().Error("ui: handler init failed; /ui/ disabled", "err", err)
 		} else {
-			mux.Handle("/ui/", http.StripPrefix("/ui", uiHandler))
+			// Each UI route registered explicitly rather than as a
+			// "/ui/" subtree: the channel wildcard in
+			// /{channel}/src/contrib/... makes any /ui/ prefix
+			// ambiguous, which Go 1.22's pattern mux refuses at
+			// registration time. Per-route lets us keep the R-
+			// compatible CRAN URL shape intact.
+			stripped := http.StripPrefix("/ui", uiHandler)
+			mux.Handle("GET /ui/{$}", stripped)
+			mux.Handle("GET /ui/login", stripped)
+			mux.Handle("POST /ui/login", stripped)
+			mux.Handle("POST /ui/logout", stripped)
+			mux.Handle("GET /ui/events", stripped)
+			mux.Handle("GET /ui/cells", stripped)
+			mux.Handle("GET /ui/storage", stripped)
+			mux.Handle("GET /ui/channels/{name}", stripped)
+			mux.Handle("GET /ui/static/", stripped)
 		}
 	}
 
