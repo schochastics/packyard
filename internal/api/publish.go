@@ -172,12 +172,33 @@ func handlePublish(deps Deps) http.HandlerFunc {
 			deps.Index.InvalidateChannel(channel)
 		}
 
+		recordPublishMetric(deps, channel, resp)
+		refreshCASBytes(r.Context(), deps)
+
 		status := http.StatusCreated
 		if resp.AlreadyExisted {
 			status = http.StatusOK
 		}
 		writeJSON(w, r, status, resp)
 	}
+}
+
+// recordPublishMetric bumps pakman_publish_total with a result label
+// that distinguishes created / overwrote / already_existed so dashboards
+// can separate "new versions" from "replay traffic" from "CI overwriting
+// the same dev version 100 times".
+func recordPublishMetric(deps Deps, channel string, resp *PublishResponse) {
+	if deps.Metrics == nil {
+		return
+	}
+	result := "created"
+	switch {
+	case resp.AlreadyExisted:
+		result = "already_existed"
+	case resp.Overwritten:
+		result = "overwrote"
+	}
+	deps.Metrics.PublishTotal.WithLabelValues(channel, result).Inc()
 }
 
 // lookupChannelPolicy returns the overwrite_policy for a channel and a

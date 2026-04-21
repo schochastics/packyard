@@ -102,7 +102,10 @@ func New() *Metrics {
 			prometheus.GaugeOpts{
 				Namespace: "pakman",
 				Name:      "cas_bytes",
-				Help:      "Total bytes stored in the content-addressable blob store.",
+				Help: "Logical bytes tracked by the DB: SUM(packages.source_size) + " +
+					"SUM(binaries.size). Upper bound on on-disk CAS footprint; " +
+					"actual disk usage is lower when channels share bytes (CAS dedupes). " +
+					"A precise on-disk figure lands with admin gc in B7.",
 			},
 		),
 		TokenCreateTotal: prometheus.NewCounter(

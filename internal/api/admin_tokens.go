@@ -109,6 +109,10 @@ func handleCreateToken(deps Deps) http.HandlerFunc {
 			VALUES (?, 'token_create', ?, ?)
 		`, now, labelFromContext(r.Context()), req.Label)
 
+		if deps.Metrics != nil {
+			deps.Metrics.TokenCreateTotal.Inc()
+		}
+
 		writeJSON(w, r, http.StatusCreated, CreateTokenResponse{
 			ID:        id,
 			Label:     req.Label,
@@ -205,6 +209,10 @@ func handleRevokeToken(deps Deps) http.HandlerFunc {
 			INSERT INTO events(at, type, actor, note)
 			VALUES (?, 'token_revoke', ?, ?)
 		`, now, labelFromContext(r.Context()), strconv.FormatInt(id, 10))
+
+		if deps.Metrics != nil {
+			deps.Metrics.TokenRevokeTotal.Inc()
+		}
 
 		writeJSON(w, r, http.StatusOK, RevokeTokenResponse{ID: id, Revoked: true})
 	}

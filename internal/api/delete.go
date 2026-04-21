@@ -49,6 +49,10 @@ func handleDelete(deps Deps) http.HandlerFunc {
 		if deps.Index != nil {
 			deps.Index.InvalidateChannel(channel)
 		}
+		if deps.Metrics != nil {
+			deps.Metrics.DeleteTotal.WithLabelValues(channel).Inc()
+		}
+		refreshCASBytes(r.Context(), deps)
 		writeJSON(w, r, http.StatusOK, resp)
 	}
 }

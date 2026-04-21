@@ -61,6 +61,9 @@ func handleYank(deps Deps) http.HandlerFunc {
 		if deps.Index != nil {
 			deps.Index.InvalidateChannel(channel)
 		}
+		if deps.Metrics != nil {
+			deps.Metrics.YankTotal.WithLabelValues(channel).Inc()
+		}
 		writeJSON(w, r, http.StatusOK, resp)
 	}
 }
