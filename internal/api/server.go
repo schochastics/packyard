@@ -49,6 +49,13 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}/yank", handleYank(deps))
 	mux.HandleFunc("DELETE /api/v1/packages/{channel}/{name}/{version}", handleDelete(deps))
 
+	// Admin surface. All routes require the admin scope; tokens created
+	// here can grant arbitrary privileges including admin itself, so
+	// this is a privilege-escalation surface by design.
+	mux.HandleFunc("POST /api/v1/admin/tokens", handleCreateToken(deps))
+	mux.HandleFunc("GET /api/v1/admin/tokens", handleListTokens(deps))
+	mux.HandleFunc("DELETE /api/v1/admin/tokens/{id}", handleRevokeToken(deps))
+
 	// CRAN-protocol source surface. {channel} is the first path segment
 	// so `repos = "http://pakman/<channel>"` Just Works with vanilla R —
 	// R's contrib.url() appends "/src/contrib/PACKAGES" on its own.
