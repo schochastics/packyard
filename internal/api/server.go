@@ -24,13 +24,18 @@ type Deps struct {
 //
 // Middleware order (outermost first):
 //  1. requestIDMiddleware — tag every request with an X-Request-Id
-//  2. recoveryMiddleware  — convert panics into 500 JSON envelopes
-//  3. accessLogMiddleware — one structured log line per request
+//  2. accessLogMiddleware — one structured log line per request
+//  3. recoveryMiddleware  — convert panics into 500 JSON envelopes
+//  4. authMiddleware      — resolve bearer tokens to an Identity
 //
-// Note the deviation from the more conventional "access-log then
+// Note the deviation from the more conventional "access-log outside
 // recovery" ordering: we want the access log to still fire even if a
-// handler panics, so recovery sits inside it. We log the panic
-// separately inside recovery at ERROR level.
+// handler panics, so recovery sits inside it. The panic itself is
+// logged separately by recoveryMiddleware at ERROR level.
+//
+// authMiddleware does NOT reject anonymous requests. Endpoints that
+// require auth call requireScope(); endpoints that don't (/health,
+// anon reads on the default channel when enabled) stay simple.
 func NewMux(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
@@ -40,5 +45,6 @@ func NewMux(deps Deps) http.Handler {
 		requestIDMiddleware,
 		accessLogMiddleware,
 		recoveryMiddleware,
+		authMiddleware(deps),
 	)
 }
