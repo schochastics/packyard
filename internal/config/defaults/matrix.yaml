@@ -1,0 +1,39 @@
+# pakman binary matrix — the cells for which publishers may upload binaries.
+#
+# Each cell is a (os, os_version, arch, r_minor) combination. The name is
+# what appears in manifest files and URL paths, so pick short, stable
+# identifiers. Renames require repushing binaries under the new name.
+#
+# The default matrix below matches the most common R deployment targets:
+# Ubuntu 22.04 LTS on amd64 + arm64 for current R (4.4 and 4.3).
+# Add rows for RHEL, Debian, macOS, or older R minors as your team needs.
+#
+# os:      linux | darwin | windows
+# arch:    amd64 | arm64 | i386
+# r_minor: MAJOR.MINOR (e.g. "4.4"; NOT "4.4.1" — R binaries are pinned
+#          at minor-version granularity)
+
+cells:
+  - name: ubuntu-22.04-amd64-r-4.4
+    os: linux
+    os_version: ubuntu-22.04
+    arch: amd64
+    r_minor: "4.4"
+
+  - name: ubuntu-22.04-arm64-r-4.4
+    os: linux
+    os_version: ubuntu-22.04
+    arch: arm64
+    r_minor: "4.4"
+
+  - name: ubuntu-22.04-amd64-r-4.3
+    os: linux
+    os_version: ubuntu-22.04
+    arch: amd64
+    r_minor: "4.3"
+
+  - name: ubuntu-22.04-arm64-r-4.3
+    os: linux
+    os_version: ubuntu-22.04
+    arch: arm64
+    r_minor: "4.3"

@@ -1,0 +1,32 @@
+# pakman channels — the default set shipped with the server.
+#
+# Three channels, matching the dev/test/prod staging idea from design.md §9.
+# "prod" is the default channel: when an R user installs from pakman without
+# naming a channel, they get prod.
+#
+# overwrite_policy:
+#   mutable   — publishing the same name/version again replaces the content.
+#               Useful for dev where you want to iterate without bumping
+#               the version string.
+#   immutable — publishing an already-taken name/version is rejected unless
+#               the bytes are identical (in which case it's a clean no-op).
+#               This is what prod needs so downstream consumers never see
+#               a version string that means two different things.
+#
+# You can add, rename, or remove channels here and restart the server.
+# Existing channels with packages are NEVER auto-removed — if you delete
+# a channel from this file, pakman keeps its DB row and warns at startup
+# so you can decide whether to clean up.
+
+channels:
+  - name: dev
+    overwrite_policy: mutable
+    default: false
+
+  - name: test
+    overwrite_policy: mutable
+    default: false
+
+  - name: prod
+    overwrite_policy: immutable
+    default: true
