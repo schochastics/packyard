@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,20 @@ import (
 	"strconv"
 	"strings"
 )
+
+//go:embed migrations/*.sql
+var embeddedMigrations embed.FS
+
+// MigrateEmbedded applies the migrations shipped inside the binary. It's a
+// thin wrapper over Migrate that is the right entry point for production
+// code; tests use Migrate directly with an in-memory fs.FS.
+func MigrateEmbedded(ctx context.Context, db *DB) error {
+	sub, err := fs.Sub(embeddedMigrations, "migrations")
+	if err != nil {
+		return fmt.Errorf("locate embedded migrations: %w", err)
+	}
+	return Migrate(ctx, db, sub)
+}
 
 // migrationFilename matches "NNN_some-name.sql" where NNN is one or more digits.
 // The leading number is the migration's version; filenames without this shape

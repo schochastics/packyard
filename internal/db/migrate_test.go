@@ -133,6 +133,45 @@ func TestMigrateRejectsBadFilename(t *testing.T) {
 	}
 }
 
+func TestMigrateEmbeddedBootstrapsSchema(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	database := openTestDB(t)
+
+	if err := db.MigrateEmbedded(ctx, database); err != nil {
+		t.Fatalf("MigrateEmbedded: %v", err)
+	}
+
+	// All five design-mandated tables plus schema_migrations must exist.
+	wantTables := []string{
+		"channels", "packages", "binaries", "events", "tokens",
+		"schema_migrations",
+	}
+	for _, tbl := range wantTables {
+		var got string
+		err := database.QueryRowContext(ctx,
+			`SELECT name FROM sqlite_master WHERE type='table' AND name=?`, tbl,
+		).Scan(&got)
+		if err != nil {
+			t.Errorf("table %q missing: %v", tbl, err)
+		}
+	}
+
+	// The partial-unique-index guard: two default channels must fail.
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO channels(name, overwrite_policy, is_default) VALUES ('a', 'mutable', 1);
+		INSERT INTO channels(name, overwrite_policy, is_default) VALUES ('b', 'immutable', 1);
+	`); err == nil {
+		t.Error("two default channels were accepted; channels_one_default index is missing")
+	}
+
+	// Second embedded run is a no-op.
+	if err := db.MigrateEmbedded(ctx, database); err != nil {
+		t.Fatalf("MigrateEmbedded (rerun): %v", err)
+	}
+}
+
 func TestMigrateRejectsDuplicateVersion(t *testing.T) {
 	t.Parallel()
 
