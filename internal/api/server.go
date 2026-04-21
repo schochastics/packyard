@@ -56,6 +56,13 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("GET /{channel}/src/contrib/PACKAGES.gz", handleSourcePackagesGz(deps))
 	mux.HandleFunc("GET /{channel}/src/contrib/{file}", handleSourceTarball(deps))
 
+	// CRAN-protocol binary surface. Only Linux is served directly in
+	// the URL shape; macOS and Windows binaries weren't on pakman's
+	// v1 target platforms.
+	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/PACKAGES", handleBinaryPackages(deps))
+	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/PACKAGES.gz", handleBinaryPackagesGz(deps))
+	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/{file}", handleBinaryTarball(deps))
+
 	return chain(mux,
 		requestIDMiddleware,
 		accessLogMiddleware,
