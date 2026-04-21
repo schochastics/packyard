@@ -16,6 +16,7 @@ type Deps struct {
 	CAS    *cas.Store
 	Matrix *config.MatrixConfig
 	Server *config.ServerConfig
+	Index  *Index // optional; callers may leave nil and NewMux fills it in
 }
 
 // NewMux builds the top-level HTTP handler: the http.ServeMux of
@@ -37,6 +38,10 @@ type Deps struct {
 // require auth call requireScope(); endpoints that don't (/health,
 // anon reads on the default channel when enabled) stay simple.
 func NewMux(deps Deps) http.Handler {
+	if deps.Index == nil {
+		deps.Index = NewIndex(deps.DB.DB)
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handleHealth(deps))
