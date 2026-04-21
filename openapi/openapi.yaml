@@ -185,6 +185,227 @@ components:
         revoked:
           type: boolean
 
+    # ---- Channels ------------------------------------------------------
+    ChannelSummary:
+      type: object
+      required: [name, overwrite_policy, default, created_at, package_count]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
+        overwrite_policy:
+          type: string
+          enum: [mutable, immutable]
+        default:
+          type: boolean
+          description: Exactly one channel is the default across the server.
+        created_at:
+          type: string
+          format: date-time
+        package_count:
+          type: integer
+          format: int64
+          minimum: 0
+        latest_publish_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Absent on empty channels.
+
+    ListChannelsResponse:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          items: { $ref: '#/components/schemas/ChannelSummary' }
+
+    # ---- Packages / binaries -------------------------------------------
+    BinarySummary:
+      type: object
+      required: [cell, binary_sha256, size, uploaded_at]
+      properties:
+        cell:
+          type: string
+          description: Matches a name in matrix.yaml (see GET /api/v1/cells).
+        binary_sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        size:
+          type: integer
+          format: int64
+        uploaded_at:
+          type: string
+          format: date-time
+
+    PackageSummary:
+      type: object
+      required: [id, channel, name, version, source_sha256, source_size, published_at, yanked, binaries]
+      properties:
+        id:
+          type: integer
+          format: int64
+        channel:
+          type: string
+        name:
+          type: string
+          pattern: '^[A-Za-z][A-Za-z0-9.]*[A-Za-z0-9]$'
+          description: R package name (letters/digits/dots, starts with a letter).
+        version:
+          type: string
+          pattern: '^[0-9][0-9.\-]*[0-9]$'
+        source_sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        source_size:
+          type: integer
+          format: int64
+        published_at:
+          type: string
+          format: date-time
+        published_by:
+          type: string
+          nullable: true
+          description: The label of the token that published. May be null for CLI-admin imports.
+        yanked:
+          type: boolean
+        yank_reason:
+          type: string
+          nullable: true
+        binaries:
+          type: array
+          description: |
+            The one documented exception to the flat-JSON rule (see design.md §7).
+            Always present; an empty array means the package was published
+            source-only.
+          items: { $ref: '#/components/schemas/BinarySummary' }
+
+    ListPackagesResponse:
+      type: object
+      required: [packages]
+      properties:
+        packages:
+          type: array
+          items: { $ref: '#/components/schemas/PackageSummary' }
+
+    # ---- Publish -------------------------------------------------------
+    Manifest:
+      type: object
+      required: [source]
+      description: |
+        JSON body carried in the "manifest" multipart part of a publish
+        request. `source` and `binaries[].part` must name other parts in
+        the same multipart body.
+      properties:
+        source:
+          type: string
+          description: Name of the multipart part that holds the source tarball.
+          example: source
+        description_version:
+          type: string
+          description: |
+            Optional. When set, the server verifies it matches the URL
+            `{version}` path segment — a cheap guard against typos where
+            the CI YAML and DESCRIPTION drift out of sync.
+        binaries:
+          type: array
+          items: { $ref: '#/components/schemas/ManifestBinary' }
+
+    ManifestBinary:
+      type: object
+      required: [cell, part]
+      properties:
+        cell:
+          type: string
+          description: Must exist in matrix.yaml.
+        part:
+          type: string
+          description: Name of the multipart part holding this binary's bytes.
+
+    PublishedBinary:
+      type: object
+      required: [cell, binary_sha256, size]
+      properties:
+        cell: { type: string }
+        binary_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        size: { type: integer, format: int64 }
+
+    PublishResponse:
+      type: object
+      required: [channel, name, version, source_sha256, source_size, already_existed, overwritten]
+      properties:
+        channel: { type: string }
+        name: { type: string }
+        version: { type: string }
+        source_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        source_size: { type: integer, format: int64 }
+        binaries:
+          type: array
+          nullable: true
+          items: { $ref: '#/components/schemas/PublishedBinary' }
+        already_existed:
+          type: boolean
+          description: |
+            true when replaying an identical-bytes publish against an
+            immutable channel. HTTP status is 200 rather than 201 in that
+            case.
+        overwritten:
+          type: boolean
+          description: true when replacing an existing row on a mutable channel.
+
+    # ---- Yank ----------------------------------------------------------
+    YankRequest:
+      type: object
+      description: All fields optional. An empty body is accepted.
+      properties:
+        reason:
+          type: string
+
+    YankResponse:
+      type: object
+      required: [channel, name, version, yanked]
+      properties:
+        channel: { type: string }
+        name: { type: string }
+        version: { type: string }
+        yanked: { type: boolean, enum: [true] }
+        reason:
+          type: string
+          nullable: true
+
+    # ---- Delete --------------------------------------------------------
+    DeleteResponse:
+      type: object
+      required: [channel, name, version, deleted]
+      properties:
+        channel: { type: string }
+        name: { type: string }
+        version: { type: string }
+        deleted: { type: boolean, enum: [true] }
+
+  parameters:
+    ChannelPath:
+      name: channel
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
+    PackageNamePath:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z][A-Za-z0-9.]*[A-Za-z0-9]$'
+    VersionPath:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[0-9][0-9.\-]*[0-9]$'
+
   responses:
     BadRequest:
       description: Malformed request — see `error_code`.
@@ -304,3 +525,190 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---- Channels ------------------------------------------------------
+  /api/v1/channels:
+    get:
+      summary: List channels with stats
+      description: |
+        Admin-gated for v1. Per-channel package_count and latest_publish_at
+        come from a single LEFT JOIN so listing N channels is one round
+        trip, not N+1.
+      operationId: listChannels
+      tags: [meta]
+      responses:
+        '200':
+          description: List of channels.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListChannelsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---- Packages ------------------------------------------------------
+  /api/v1/packages:
+    get:
+      summary: List packages with filters and pagination
+      description: |
+        Admin-gated for v1. Response includes inline `binaries` — the one
+        documented exception to the flat-JSON rule.
+      operationId: listPackages
+      tags: [packages]
+      parameters:
+        - name: channel
+          in: query
+          schema: { type: string }
+        - name: package
+          in: query
+          schema: { type: string }
+          description: Exact-match on package name.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 500
+            default: 100
+          description: Over-cap values are clamped, not errored.
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Paginated list. `X-Total-Count` carries the match count.
+          headers:
+            X-Total-Count:
+              schema:
+                type: integer
+                format: int64
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListPackagesResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---- Publish / Yank / Delete --------------------------------------
+  /api/v1/packages/{channel}/{name}/{version}:
+    post:
+      summary: Publish a new version
+      description: |
+        Multipart request with exactly one "manifest" JSON part plus the
+        source tarball part and zero or more binary parts. Requires
+        `publish:<channel>`.
+
+        On immutable channels: republishing identical bytes returns 200
+        with `already_existed: true`; different bytes for a version that
+        already exists returns 409 `version_immutable`.
+
+        On mutable channels: replaces the existing row and its binaries
+        atomically. Old blobs stay in CAS until garbage collection.
+      operationId: publishPackage
+      tags: [packages]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - $ref: '#/components/parameters/PackageNamePath'
+        - $ref: '#/components/parameters/VersionPath'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [manifest]
+              properties:
+                manifest:
+                  $ref: '#/components/schemas/Manifest'
+                # The additional parts named by manifest.source and
+                # manifest.binaries[].part aren't expressible in
+                # OpenAPI 3's fixed-schema multipart. The encoding
+                # below documents the contentType; clients follow the
+                # manifest for part names.
+              additionalProperties:
+                type: string
+                format: binary
+            encoding:
+              manifest:
+                contentType: application/json
+      responses:
+        '200':
+          description: Idempotent replay on immutable channel (no work done).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublishResponse' }
+        '201':
+          description: Published (or overwritten on a mutable channel).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublishResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Immutable channel and different bytes (error_code `version_immutable`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+    delete:
+      summary: Hard-delete a version (mutable channels only)
+      description: |
+        Requires `publish:<channel>`. Immutable channels return 409
+        `channel_immutable` — use yank instead there.
+      operationId: deletePackage
+      tags: [packages]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - $ref: '#/components/parameters/PackageNamePath'
+        - $ref: '#/components/parameters/VersionPath'
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeleteResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Channel is immutable (error_code `channel_immutable`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+
+  /api/v1/packages/{channel}/{name}/{version}/yank:
+    post:
+      summary: Yank a version
+      description: |
+        Flags the version as yanked. The tarball stays reachable so in-
+        flight installs don't break; PACKAGES lists the row with
+        `Yanked: yes`. Works on every channel (including immutable).
+        Requires `yank:<channel>`.
+      operationId: yankPackage
+      tags: [packages]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - $ref: '#/components/parameters/PackageNamePath'
+        - $ref: '#/components/parameters/VersionPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/YankRequest' }
+      responses:
+        '200':
+          description: Yanked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/YankResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
