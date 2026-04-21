@@ -1,0 +1,306 @@
+openapi: 3.0.3
+
+info:
+  title: pakman
+  description: |
+    Single-binary R package registry for internal R packages.
+
+    The JSON API surface (`/api/v1/...`) is what ops tooling, CI pipelines,
+    and the operator dashboard consume. The CRAN-protocol surface (routes
+    at the top of the URL tree) is what R clients such as `install.packages`,
+    `renv`, and `pak` hit directly.
+
+    See https://github.com/schochastics/pakman for docs and the
+    implementation plan.
+  version: 0.1.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://pakman.example.com
+    description: Production deployment (example)
+
+# Every route under /api/v1 requires a bearer token except /health. The
+# CRAN-protocol routes are documented with their own security override
+# in B2-C3 so this default matches the "admin/CI path" shape.
+security:
+  - bearerAuth: []
+
+tags:
+  - name: admin
+    description: Token and server management. All operations require the `admin` scope.
+  - name: packages
+    description: Publishing, yanking, deleting, and inspecting packages.
+  - name: cran
+    description: CRAN-protocol read surface consumed by R clients.
+  - name: meta
+    description: Server-level metadata (channels, cells, events, health).
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: pkm_opaque_token
+      description: |
+        Opaque token minted via `POST /api/v1/admin/tokens` or the server
+        CLI's `-mint-token` flag. Tokens are prefixed `pkm_` so they are
+        identifiable in logs and secret scanners. The server stores
+        `sha256(token)` only; the plaintext is returned once at creation
+        and never again.
+
+  schemas:
+    # ---- Common error envelope -----------------------------------------
+    ErrorBody:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code:
+          type: string
+          description: Stable machine-readable identifier. Enumerated exhaustively below.
+          enum:
+            - bad_request
+            - unauthorized
+            - insufficient_scope
+            - not_found
+            - conflict
+            - version_immutable
+            - channel_immutable
+            - internal_error
+            - unavailable
+            - payload_too_large
+        message:
+          type: string
+          description: Human-readable one-line summary.
+        hint:
+          type: string
+          description: Optional "try X next" guidance; absent when not useful.
+        request_id:
+          type: string
+          format: uuid
+          description: Server-assigned UUIDv7 echoed in the X-Request-Id response header.
+
+    # ---- Health --------------------------------------------------------
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        version:
+          type: string
+          description: Build version string (from the version.Version ldflag).
+
+    # ---- Admin tokens --------------------------------------------------
+    CreateTokenRequest:
+      type: object
+      required: [label, scopes]
+      properties:
+        label:
+          type: string
+          minLength: 1
+          description: Short human-readable name used in audit logs.
+          example: ci-github-prod
+        scopes:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            pattern: '^[a-z][a-z0-9_-]*(:([a-z0-9_*-]+))?$'
+          description: |
+            Non-empty list of scope strings. Each scope is either a bare
+            keyword (e.g. `admin`) or `verb:target`. The wildcard `*` is
+            valid within the target position — `publish:*` grants publish
+            on every channel.
+          example: [publish:dev, read:*]
+
+    CreateTokenResponse:
+      type: object
+      required: [id, label, scopes, created_at, token]
+      properties:
+        id:
+          type: integer
+          format: int64
+        label:
+          type: string
+        scopes:
+          type: array
+          items: { type: string }
+        created_at:
+          type: string
+          format: date-time
+        token:
+          type: string
+          description: |
+            Plaintext token. Returned ONCE — no subsequent endpoint echoes
+            it. Clients must capture this value immediately; if lost, the
+            token must be revoked and a new one issued.
+          example: pkm_9ae09e23484e0071e1e365f5324d4955aa9c1419521e88b70c065bacf6f17242
+
+    TokenSummary:
+      type: object
+      required: [id, label, scopes, created_at]
+      properties:
+        id:
+          type: integer
+          format: int64
+        label:
+          type: string
+        scopes:
+          type: array
+          items: { type: string }
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Best-effort timestamp of the last successful auth. Absent for unused tokens.
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set when revoked; absent for active tokens.
+
+    ListTokensResponse:
+      type: object
+      required: [tokens]
+      properties:
+        tokens:
+          type: array
+          items: { $ref: '#/components/schemas/TokenSummary' }
+
+    RevokeTokenResponse:
+      type: object
+      required: [id, revoked]
+      properties:
+        id:
+          type: integer
+          format: int64
+        revoked:
+          type: boolean
+
+  responses:
+    BadRequest:
+      description: Malformed request — see `error_code`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Unauthorized:
+      description: Missing, invalid, or revoked bearer token.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Forbidden:
+      description: Token is valid but lacks the required scope.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    NotFound:
+      description: Resource does not exist on this server.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    Conflict:
+      description: Request conflicts with current state (see `error_code`).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+    PayloadTooLarge:
+      description: Request body exceeded the configured size cap.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorBody' }
+
+paths:
+  # ---- Meta / Health ---------------------------------------------------
+  /health:
+    get:
+      summary: Liveness probe
+      description: Pings the DB. Does not require auth so load balancers can poll anonymously.
+      operationId: health
+      tags: [meta]
+      security: []
+      responses:
+        '200':
+          description: Service is healthy.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+        '503':
+          description: A subsystem (usually the DB) is unreachable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorBody' }
+
+  # ---- Admin / Tokens --------------------------------------------------
+  /api/v1/admin/tokens:
+    post:
+      summary: Mint a new API token
+      description: |
+        Returns the plaintext token EXACTLY ONCE. Requires `admin` scope —
+        admin callers can mint tokens with arbitrary privileges including
+        admin itself, so treat `admin` as root.
+      operationId: createToken
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTokenRequest' }
+      responses:
+        '201':
+          description: Token created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CreateTokenResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+    get:
+      summary: List tokens
+      description: Returns every token row. Plaintext is never included.
+      operationId: listTokens
+      tags: [admin]
+      responses:
+        '200':
+          description: List of tokens.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListTokensResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/admin/tokens/{id}:
+    delete:
+      summary: Revoke a token
+      description: |
+        Stamps `revoked_at` on the row. Idempotent — revoking an already-
+        revoked token is a 200 no-op. Returns 404 for unknown ids.
+      operationId: revokeToken
+      tags: [admin]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      responses:
+        '200':
+          description: Revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RevokeTokenResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
