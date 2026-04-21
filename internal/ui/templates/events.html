@@ -1,0 +1,75 @@
+{{define "content"}}
+<h1>Events</h1>
+
+<form class="filters" method="get" action="/ui/events">
+  <label>Channel
+    <select name="channel">
+      <option value="">all</option>
+      {{range .Data.Channels}}
+      <option value="{{.}}"{{if eq . $.Data.Filter.Channel}} selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+  </label>
+  <label>Type
+    <select name="type">
+      <option value="">all</option>
+      {{range .Data.EventTypes}}
+      <option value="{{.}}"{{if eq . $.Data.Filter.Type}} selected{{end}}>{{.}}</option>
+      {{end}}
+    </select>
+  </label>
+  <label>Package
+    <input type="text" name="package" value="{{.Data.Filter.Package}}" placeholder="exact match">
+  </label>
+  <button type="submit">Apply</button>
+  {{if or .Data.Filter.Channel .Data.Filter.Type .Data.Filter.Package}}
+  <a class="clear" href="/ui/events">clear</a>
+  {{end}}
+</form>
+
+<p class="muted">
+  {{if gt .Data.Total 0}}
+    Showing page {{.Data.Page}} — {{len .Data.Rows}} of {{.Data.Total}} total
+  {{else}}
+    No events match these filters.
+  {{end}}
+</p>
+
+{{if .Data.Rows}}
+<table class="events">
+  <thead>
+    <tr>
+      <th>ID</th><th>Time</th><th>Type</th><th>Channel</th><th>Package</th><th>Version</th><th>Actor</th><th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Data.Rows}}
+    <tr>
+      <td class="muted">{{.ID}}</td>
+      <td class="muted">{{fmtTime .At}}</td>
+      <td><span class="evt evt-{{.Type}}">{{.Type}}</span></td>
+      <td>{{if .Channel}}<a href="/ui/channels/{{.Channel}}">{{.Channel}}</a>{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{if .Package}}<code>{{.Package}}</code>{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{if .Version}}<code>{{.Version}}</code>{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="muted">{{if .Actor}}{{.Actor}}{{else}}—{{end}}</td>
+      <td class="muted">{{.Note}}</td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}
+
+<nav class="pager">
+  {{if .Data.HasPrev}}
+    <a href="?{{pagerQuery .Data (add .Data.Page -1)}}">← Previous</a>
+  {{else}}
+    <span class="muted">← Previous</span>
+  {{end}}
+  <span class="muted">Page {{.Data.Page}}</span>
+  {{if .Data.HasNext}}
+    <a href="?{{pagerQuery .Data (add .Data.Page 1)}}">Next →</a>
+  {{else}}
+    <span class="muted">Next →</span>
+  {{end}}
+</nav>
+{{end}}

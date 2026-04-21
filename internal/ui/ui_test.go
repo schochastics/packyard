@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -405,6 +406,64 @@ func TestFmtBytes(t *testing.T) {
 		if got := fmtBytes(c.n); got != c.want {
 			t.Errorf("fmtBytes(%d) = %q; want %q", c.n, got, c.want)
 		}
+	}
+}
+
+func TestEventsPageRendersWithFiltersAndPagination(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	value := signSessionCookie(tok, h.deps.SessionKey)
+
+	ctx := context.Background()
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO channels(name, overwrite_policy) VALUES ('dev', 'mutable'), ('prod', 'immutable')`,
+	); err != nil {
+		t.Fatalf("seed channels: %v", err)
+	}
+	// Seed > 1 page of events so we can check HasNext.
+	for i := 0; i < 60; i++ {
+		channel := "dev"
+		if i%2 == 0 {
+			channel = "prod"
+		}
+		typ := "publish"
+		if i%5 == 0 {
+			typ = "yank"
+		}
+		if _, err := database.ExecContext(ctx,
+			`INSERT INTO events(type, actor, channel, package, version) VALUES (?, 'ci', ?, 'foo', ?)`,
+			typ, channel, "1.0."+strconv.Itoa(i),
+		); err != nil {
+			t.Fatalf("seed event %d: %v", i, err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/events", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body:\n%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Next →") {
+		t.Errorf("expected Next link on page 1 with 60 events and default 50 pageSize")
+	}
+	if !strings.Contains(body, `of 60 total`) {
+		t.Errorf("expected total count 60 in body")
+	}
+
+	// Filter by type=yank (12 yanks out of 60).
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/events?type=yank", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "evt-publish") {
+		t.Errorf("type=yank filter should not show publish events")
 	}
 }
 

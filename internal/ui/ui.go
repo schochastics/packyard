@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -54,6 +55,7 @@ func NewHandler(deps Deps) (*Handler, error) {
 	mux.HandleFunc("POST /login", h.handleLoginSubmit)
 	mux.HandleFunc("POST /logout", h.handleLogout)
 	mux.HandleFunc("GET /channels/{name}", h.handleChannelDetail)
+	mux.HandleFunc("GET /events", h.handleEvents)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 	h.mux = mux
 
@@ -70,9 +72,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // We parse once at startup; serving pages never allocates a new tree.
 func parseTemplates() (*template.Template, error) {
 	return template.New("").Funcs(template.FuncMap{
-		"fmtTime":  fmtTime,
-		"fmtBytes": fmtBytes,
+		"fmtTime":    fmtTime,
+		"fmtBytes":   fmtBytes,
+		"add":        func(a, b int) int { return a + b },
+		"pagerQuery": pagerQuery,
 	}).ParseFS(templatesFS, "templates/*.html")
+}
+
+// pagerQuery rebuilds the events page querystring preserving active
+// filters while swapping the page number. Returned as a plain string
+// — html/template will attribute-escape `&` as `&amp;` which browsers
+// parse back into a valid query.
+func pagerQuery(data *eventsPageData, page int) string {
+	v := url.Values{}
+	v.Set("page", strconv.Itoa(page))
+	if data.Filter.Channel != "" {
+		v.Set("channel", data.Filter.Channel)
+	}
+	if data.Filter.Type != "" {
+		v.Set("type", data.Filter.Type)
+	}
+	if data.Filter.Package != "" {
+		v.Set("package", data.Filter.Package)
+	}
+	return v.Encode()
 }
 
 // fmtBytes renders a byte count in the closest IEC unit (KiB, MiB…).
@@ -207,6 +230,35 @@ func (h *Handler) handleChannelDetail(w http.ResponseWriter, r *http.Request) {
 		Data *channelDetailData
 	}{
 		viewData: viewData{Title: "Channel " + name, Identity: &id},
+		Data:     data,
+	})
+}
+
+func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.sessionIdentity(r)
+	if !ok {
+		redirectLogin(w, r)
+		return
+	}
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	pageSize, _ := strconv.Atoi(q.Get("page_size"))
+	filter := eventFilter{
+		Channel: q.Get("channel"),
+		Type:    q.Get("type"),
+		Package: q.Get("package"),
+	}
+
+	data, err := loadEventsPage(r.Context(), h.deps.DB.DB, page, pageSize, filter)
+	if err != nil {
+		h.renderError(w, r, err)
+		return
+	}
+	h.renderPage(w, r, "events.html", struct {
+		viewData
+		Data *eventsPageData
+	}{
+		viewData: viewData{Title: "Events", Identity: &id},
 		Data:     data,
 	})
 }

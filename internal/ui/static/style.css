@@ -237,6 +237,67 @@ h2 {
 
 tr.yanked code { color: #888; text-decoration: line-through; }
 
+.filters {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+  margin: 1rem 0;
+}
+
+.filters label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8rem;
+  color: #555;
+  gap: 0.2rem;
+}
+
+.filters select,
+.filters input[type=text] {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  min-width: 140px;
+}
+
+.filters button {
+  background: #1a2533;
+  color: #fff;
+  border: 0;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.filters .clear {
+  color: #777;
+  font-size: 0.85rem;
+  text-decoration: none;
+  align-self: center;
+}
+.filters .clear:hover { text-decoration: underline; }
+
+.pager {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+
+.pager a {
+  color: #1a2533;
+  text-decoration: none;
+  font-weight: 600;
+}
+.pager a:hover { text-decoration: underline; }
+
 /* Events table. */
 .events {
   width: 100%;
