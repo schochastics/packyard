@@ -1,0 +1,49 @@
+# golangci-lint configuration for pakman.
+# See https://golangci-lint.run/usage/configuration/ for all options.
+run:
+  timeout: 3m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck       # unchecked errors
+    - govet          # stdlib analyzers
+    - ineffassign    # assigned but never used
+    - staticcheck    # comprehensive static analysis
+    - unused         # unused identifiers
+    - gofmt          # standard formatting
+    - goimports      # import grouping / formatting
+    - revive         # style (replacement for golint)
+    - misspell       # typos in comments
+    - unconvert      # unnecessary type conversions
+    - gosec          # security issues
+    - bodyclose      # unclosed http response bodies
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+      - name: var-naming
+      - name: package-comments
+      - name: error-return
+      - name: error-naming
+  gosec:
+    excludes:
+      - G104  # errors.New; noisy and mostly covered by errcheck
+  misspell:
+    locale: US
+
+issues:
+  exclude-rules:
+    # Allow fmt.Println, os.Exit etc. in main
+    - path: cmd/
+      linters:
+        - gosec
+    # Tests may have long funcs, duplicated setup
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+  max-issues-per-linter: 0
+  max-same-issues: 0
