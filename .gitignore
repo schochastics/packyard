@@ -1,5 +1,5 @@
-# Binaries
-pakman-server
+# Binaries (anchored to repo root; do not ignore cmd/pakman-server/)
+/pakman-server
 /dist/
 /bin/
 
