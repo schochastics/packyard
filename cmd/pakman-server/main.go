@@ -28,6 +28,17 @@ import (
 )
 
 func main() {
+	// Subcommand dispatch happens before flag.Parse so subcommands can
+	// own their own FlagSet. Keeps top-level flags unchanged for the
+	// common case (just run the server).
+	if len(os.Args) > 1 && os.Args[1] == "admin" {
+		if err := adminMain(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "pakman-server: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	var (
 		showVersion = flag.Bool("version", false, "print version and exit")
 		configPath  = flag.String("config", "", "path to server config file (YAML)")
