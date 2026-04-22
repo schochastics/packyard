@@ -78,6 +78,43 @@ func TestLiveBlobSetCollectsPackagesAndBinaries(t *testing.T) {
 	}
 }
 
+func TestVerifyBlobsReportsMissing(t *testing.T) {
+	deps := newGCTestDeps(t)
+	root := deps.CAS.Root()
+	ctx := context.Background()
+
+	if _, err := deps.DB.ExecContext(ctx,
+		`INSERT INTO channels(name, overwrite_policy) VALUES ('dev', 'mutable')`,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	const liveSum = "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc1"
+	const missingSum = "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd2"
+
+	// Seed two packages: one with a CAS blob, one without.
+	if _, err := deps.DB.ExecContext(ctx,
+		`INSERT INTO packages(channel, name, version, source_sha256, source_size)
+		 VALUES ('dev', 'ok', '1.0.0', ?, 1), ('dev', 'gone', '1.0.0', ?, 1)`,
+		liveSum, missingSum,
+	); err != nil {
+		t.Fatal(err)
+	}
+	writeOrphan(t, root, liveSum, "x")
+	// Don't write the missingSum blob.
+
+	missing, err := verifyBlobs(deps)
+	if err != nil {
+		t.Fatalf("verifyBlobs: %v", err)
+	}
+	if len(missing) != 1 {
+		t.Fatalf("missing = %d; want 1", len(missing))
+	}
+	if missing[0].Package != "gone" || missing[0].Column != "source" {
+		t.Errorf("unexpected missing entry: %+v", missing[0])
+	}
+}
+
 func TestAdminGCReclaimsOrphan(t *testing.T) {
 	deps := newGCTestDeps(t)
 	root := deps.CAS.Root()
