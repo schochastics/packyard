@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/schochastics/pakman/internal/api"
 	"github.com/schochastics/pakman/internal/cas"
@@ -49,9 +51,215 @@ func adminMain(args []string) error {
 	switch rest[0] {
 	case "import":
 		return adminImport(cfg, rest[1:])
+	case "channels":
+		return adminChannels(cfg, rest[1:])
+	case "cells":
+		return adminCells(cfg, rest[1:])
 	default:
 		return adminUsageError("admin: unknown verb %q", rest[0])
 	}
+}
+
+func adminChannels(cfg *config.ServerConfig, args []string) error {
+	if len(args) == 0 {
+		return adminUsageError("admin channels: missing subverb (list)")
+	}
+	switch args[0] {
+	case "list":
+		return adminChannelsList(cfg)
+	default:
+		return adminUsageError("admin channels: unknown subverb %q", args[0])
+	}
+}
+
+func adminCells(cfg *config.ServerConfig, args []string) error {
+	if len(args) == 0 {
+		return adminUsageError("admin cells: missing subverb (list|show)")
+	}
+	switch args[0] {
+	case "list":
+		return adminCellsList(cfg)
+	case "show":
+		return adminCellsShow(cfg, args[1:])
+	default:
+		return adminUsageError("admin cells: unknown subverb %q", args[0])
+	}
+}
+
+// adminChannelsList prints every channel's name, overwrite policy,
+// default-flag, package count, and most-recent publish timestamp.
+// Mirrors the JSON shape of GET /api/v1/channels but as an aligned
+// text table.
+func adminChannelsList(cfg *config.ServerConfig) error {
+	deps, cleanup, err := openAdminDeps(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	rows, err := deps.DB.QueryContext(context.Background(), `
+		SELECT c.name, c.overwrite_policy, c.is_default,
+		       COUNT(p.id) AS pkg_count,
+		       COALESCE(MAX(p.published_at), '') AS latest
+		FROM channels c
+		LEFT JOIN packages p ON p.channel = c.name
+		GROUP BY c.name, c.overwrite_policy, c.is_default
+		ORDER BY c.is_default DESC, c.name
+	`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	tw := newTabWriter()
+	fmt.Fprintln(tw, "NAME\tPOLICY\tDEFAULT\tPACKAGES\tLATEST PUBLISH")
+	for rows.Next() {
+		var (
+			name, policy, latest string
+			isDefault            int
+			count                int64
+		)
+		if err := rows.Scan(&name, &policy, &isDefault, &count, &latest); err != nil {
+			return err
+		}
+		def := ""
+		if isDefault == 1 {
+			def = "yes"
+		}
+		if latest == "" {
+			latest = "—"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n", name, policy, def, count, latest)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return tw.Flush()
+}
+
+// adminCellsList prints every cell declared in matrix.yaml with its
+// coverage (how many of the total packages have a binary for the cell)
+// and total bytes uploaded.
+func adminCellsList(cfg *config.ServerConfig) error {
+	deps, cleanup, err := openAdminDeps(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if deps.Matrix == nil {
+		return fmt.Errorf("matrix.yaml not loaded; see earlier warning")
+	}
+
+	var total int64
+	if err := deps.DB.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM packages`).Scan(&total); err != nil {
+		return err
+	}
+
+	// Aggregate per cell.
+	agg := map[string]struct {
+		BinCount, PkgCount, Bytes int64
+	}{}
+	rows, err := deps.DB.QueryContext(context.Background(), `
+		SELECT cell, COUNT(*), COUNT(DISTINCT package_id), COALESCE(SUM(size), 0)
+		FROM binaries GROUP BY cell
+	`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var cell string
+		var binCount, pkgCount, bytes int64
+		if err := rows.Scan(&cell, &binCount, &pkgCount, &bytes); err != nil {
+			return err
+		}
+		agg[cell] = struct {
+			BinCount, PkgCount, Bytes int64
+		}{binCount, pkgCount, bytes}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	tw := newTabWriter()
+	fmt.Fprintln(tw, "CELL\tOS\tARCH\tR\tBINARIES\tCOVERAGE\tSIZE")
+	for _, c := range deps.Matrix.Cells {
+		a := agg[c.Name]
+		coverage := "—"
+		if total > 0 {
+			coverage = fmt.Sprintf("%d/%d", a.PkgCount, total)
+		}
+		fmt.Fprintf(tw, "%s\t%s %s\t%s\t%s\t%d\t%s\t%s\n",
+			c.Name, c.OS, c.OSVersion, c.Arch, c.RMinor,
+			a.BinCount, coverage, humanBytes(a.Bytes))
+	}
+	return tw.Flush()
+}
+
+// adminCellsShow prints the matrix entry for a single cell and lists
+// packages that have NO binary for that cell (the coverage gap). Useful
+// during a cell rollout — tells the operator exactly which packages
+// still need a build targeting the new cell.
+func adminCellsShow(cfg *config.ServerConfig, args []string) error {
+	if len(args) != 1 {
+		return adminUsageError("admin cells show: expected exactly one <cell-name> argument")
+	}
+	cellName := args[0]
+
+	deps, cleanup, err := openAdminDeps(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	if deps.Matrix == nil {
+		return fmt.Errorf("matrix.yaml not loaded")
+	}
+	cell := deps.Matrix.Lookup(cellName)
+	if cell == nil {
+		return fmt.Errorf("cell %q not declared in matrix.yaml", cellName)
+	}
+
+	fmt.Printf("cell %s\n  os     %s %s\n  arch   %s\n  r      %s\n\n",
+		cell.Name, cell.OS, cell.OSVersion, cell.Arch, cell.RMinor)
+
+	// Packages missing a binary for this cell. A LEFT JOIN + NULL filter
+	// keeps this to one query.
+	rows, err := deps.DB.QueryContext(context.Background(), `
+		SELECT p.channel, p.name, p.version, p.published_at
+		FROM packages p
+		LEFT JOIN binaries b ON b.package_id = p.id AND b.cell = ?
+		WHERE b.id IS NULL AND p.yanked = 0
+		ORDER BY p.channel, p.name, p.version
+	`, cellName)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+
+	tw := newTabWriter()
+	fmt.Fprintln(tw, "CHANNEL\tPACKAGE\tVERSION\tPUBLISHED")
+	any := false
+	for rows.Next() {
+		var ch, name, ver, pub string
+		if err := rows.Scan(&ch, &name, &ver, &pub); err != nil {
+			return err
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", ch, name, ver, pub)
+		any = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if !any {
+		fmt.Println("all live packages have a binary for this cell.")
+	}
+	return nil
 }
 
 // adminImport routes `admin import <source> …`.
@@ -221,4 +429,39 @@ const adminUsageText = `usage:
 
 verbs:
   import drat <repo-url> -channel <name>
-  import git  <repo-url> [-branch <b>] -channel <name>`
+  import git  <repo-url> [-branch <b>] -channel <name>
+  channels list
+  cells list
+  cells show <cell-name>`
+
+// newTabWriter produces a stdout-backed writer with consistent column
+// padding for every admin subcommand.
+func newTabWriter() *tabwriter.Writer {
+	return tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+}
+
+// humanBytes renders n in the closest IEC unit for CLI output. The UI
+// has its own fmtBytes; duplicated here rather than exported because
+// the call sites are tiny and the dependency direction (cmd -> ui)
+// would be backwards.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return strconv.FormatInt(n, 10) + " B"
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	if exp >= len(units) {
+		exp = len(units) - 1
+	}
+	v := float64(n) / float64(div)
+	if v == float64(int(v)) {
+		return strconv.FormatInt(int64(v), 10) + " " + units[exp]
+	}
+	s := strconv.FormatFloat(v, 'f', 1, 64)
+	return s + " " + units[exp]
+}
