@@ -55,9 +55,136 @@ func adminMain(args []string) error {
 		return adminChannels(cfg, rest[1:])
 	case "cells":
 		return adminCells(cfg, rest[1:])
+	case "gc":
+		return adminGC(cfg, rest[1:])
 	default:
 		return adminUsageError("admin: unknown verb %q", rest[0])
 	}
+}
+
+// adminGC reclaims CAS blobs that no longer appear in any package or
+// binary row. Safe to run while the server is stopped; running against
+// a live server is a known-sharp-edge op — see the cas.GC doc comment.
+//
+// Output reports scanned / removed / freed bytes so an operator can
+// tell at a glance whether the run did anything.
+func adminGC(cfg *config.ServerConfig, args []string) error {
+	fs := flag.NewFlagSet("admin gc", flag.ContinueOnError)
+	dryRun := fs.Bool("dry-run", false, "print what would be removed; do not actually delete")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return adminUsageError("admin gc: no positional arguments expected")
+	}
+
+	deps, cleanup, err := openAdminDeps(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	live, err := liveBlobSet(deps)
+	if err != nil {
+		return fmt.Errorf("build live set: %w", err)
+	}
+	fmt.Printf("live blobs referenced by DB: %d\n", len(live))
+
+	if *dryRun {
+		// Dry run: walk what GC would scan and report, but don't delete.
+		// Swap live with a dummy that claims every blob is live, so GC
+		// walks without removing anything, then re-walk ourselves to
+		// compute the count. Simpler: duplicate the small bit of walk
+		// logic here with a Has check.
+		return dryRunGC(deps, live)
+	}
+
+	report, err := deps.CAS.GC(live)
+	if err != nil {
+		return fmt.Errorf("gc: %w", err)
+	}
+	fmt.Printf("scanned=%d removed=%d freed=%s skipped_stray=%d\n",
+		report.Scanned, report.Removed, humanBytes(report.FreedBytes), report.SkippedStray)
+	return nil
+}
+
+// liveBlobSet returns the union of every sha256 referenced by a live
+// package or binary row. Yanked packages are INCLUDED — yanking is a
+// visibility operation; the blob is still reachable via the audit log
+// and admins can unyank.
+func liveBlobSet(deps api.Deps) (map[string]struct{}, error) {
+	out := map[string]struct{}{}
+
+	collect := func(query string) error {
+		rows, err := deps.DB.QueryContext(context.Background(), query)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var sum string
+			if err := rows.Scan(&sum); err != nil {
+				return err
+			}
+			out[sum] = struct{}{}
+		}
+		return rows.Err()
+	}
+
+	if err := collect(`SELECT DISTINCT source_sha256 FROM packages`); err != nil {
+		return nil, err
+	}
+	if err := collect(`SELECT DISTINCT binary_sha256 FROM binaries`); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// dryRunGC reports what a real GC would remove, without deleting. No
+// new CAS API needed: we use cas.Has to check each filesystem blob
+// that isn't in live. Walks via filepath.Walk for simplicity since a
+// dry-run doesn't need the subtree-skip logic GC has for tmp/.
+func dryRunGC(deps api.Deps, live map[string]struct{}) error {
+	root := deps.CAS.Root()
+	var scanned, wouldRemove int
+	var wouldFree int64
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if filepath.Base(path) == "tmp" && filepath.Dir(path) == root {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		// <aa>/<rest> shape — reuse cas' own check indirectly by
+		// reassembling sha.
+		shard, file := filepath.Split(rel)
+		shard = strings.TrimSuffix(shard, string(filepath.Separator))
+		if len(shard) != 2 || len(file) != 62 {
+			return nil
+		}
+		sum := shard + file
+		scanned++
+		if _, ok := live[sum]; !ok {
+			wouldRemove++
+			wouldFree += info.Size()
+			fmt.Printf("  would remove: %s (%s)\n", sum, humanBytes(info.Size()))
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Printf("DRY RUN — scanned=%d would_remove=%d would_free=%s\n",
+		scanned, wouldRemove, humanBytes(wouldFree))
+	return nil
 }
 
 func adminChannels(cfg *config.ServerConfig, args []string) error {
@@ -432,7 +559,8 @@ verbs:
   import git  <repo-url> [-branch <b>] -channel <name>
   channels list
   cells list
-  cells show <cell-name>`
+  cells show <cell-name>
+  gc [-dry-run]`
 
 // newTabWriter produces a stdout-backed writer with consistent column
 // padding for every admin subcommand.
