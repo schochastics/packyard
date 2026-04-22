@@ -1,0 +1,99 @@
+# examples/ci/publish.yml — reference template for publishing an R package
+# to pakman. Works on GitHub Actions and Gitea Actions. Requires:
+#   - Repo secret PAKMAN_TOKEN with publish:<channel> scope.
+#   - Repo variable PAKMAN_SERVER (e.g. https://pakman.corp).
+#   - Cells below must match the server's matrix.yaml (GET /api/v1/cells).
+#
+# Baked-in assumptions (see design.md §8.4 for rationale):
+#   - One R package per repository; DESCRIPTION at repo root.
+#   - Cell images already contain everything the package needs to build;
+#     no apt-get / SystemRequirements parsing.
+#   - Branch-to-channel mapping is a hardcoded case: main -> prod, everything
+#     else -> dev. Fork and edit to taste.
+
+name: Publish to pakman
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  build-source:
+    runs-on: ubuntu-latest
+    container: { image: ghcr.io/rocker-org/r-ver:4.4 }
+    outputs:
+      source_file: ${{ steps.build.outputs.source_file }}
+      package:     ${{ steps.meta.outputs.package }}
+      version:     ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: |
+          echo "package=$(awk '/^Package:/ {print $2}' DESCRIPTION)" >> "$GITHUB_OUTPUT"
+          echo "version=$(awk '/^Version:/ {print $2}' DESCRIPTION)" >> "$GITHUB_OUTPUT"
+      - id: build
+        run: |
+          R CMD build .
+          echo "source_file=$(ls *.tar.gz | head -n1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with: { name: source, path: "*.tar.gz" }
+
+  build-binary:
+    needs: build-source
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cell:
+          - { name: ubuntu-22.04-amd64-r4.4, image: ghcr.io/rocker-org/r-ver:4.4 }
+          - { name: ubuntu-24.04-amd64-r4.5, image: ghcr.io/rocker-org/r-ver:4.5 }
+    container: { image: "${{ matrix.cell.image }}" }
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: source }
+      - run: R CMD INSTALL --build ${{ needs.build-source.outputs.source_file }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.cell.name }}
+          path: "*_R_*.tar.gz"
+
+  publish:
+    needs: [build-source, build-binary]
+    runs-on: ubuntu-latest
+    steps:
+      - id: channel
+        run: |
+          case "${{ github.ref }}" in
+            refs/heads/main) echo "name=prod" >> "$GITHUB_OUTPUT" ;;
+            *)               echo "name=dev"  >> "$GITHUB_OUTPUT" ;;
+          esac
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - env:
+          PAKMAN_SERVER: ${{ vars.PAKMAN_SERVER }}
+          PAKMAN_TOKEN:  ${{ secrets.PAKMAN_TOKEN }}
+          PKG:           ${{ needs.build-source.outputs.package }}
+          VER:           ${{ needs.build-source.outputs.version }}
+          CHANNEL:       ${{ steps.channel.outputs.name }}
+        run: |
+          set -euo pipefail
+          SOURCE=$(ls artifacts/source/*.tar.gz)
+          MANIFEST=$(jq -n --arg c "$CHANNEL" --arg p "$PKG" --arg v "$VER" \
+            '{channel:$c, package:$p, version:$v, binaries:[]}')
+          CURL_FILES=(-F "source=@$SOURCE;type=application/gzip")
+          for dir in artifacts/binary-*; do
+            CELL=${dir##*/binary-}
+            PART="bin_$(echo "$CELL" | tr -c 'A-Za-z0-9' _)"
+            FILE=$(ls "$dir"/*.tar.gz)
+            MANIFEST=$(echo "$MANIFEST" | jq \
+              --arg cell "$CELL" --arg part "$PART" \
+              '.binaries += [{cell:$cell, part:$part}]')
+            CURL_FILES+=(-F "$PART=@$FILE;type=application/gzip")
+          done
+          echo "$MANIFEST" > manifest.json
+          curl --fail-with-body -X POST \
+            -H "Authorization: Bearer $PAKMAN_TOKEN" \
+            -F "manifest=@manifest.json;type=application/json" \
+            "${CURL_FILES[@]}" \
+            "$PAKMAN_SERVER/api/v1/packages/$CHANNEL/$PKG/$VER"
