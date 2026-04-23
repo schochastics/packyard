@@ -106,7 +106,7 @@ Five endpoints, in this order:
 5. `GET /` from `/ui/` — operator dashboard.
 
 The real CI flow replaces step 4 with a multi-job workflow that builds
-per-cell binaries; see [examples/ci/README.md](../../examples/ci/README.md).
+per-cell binaries; see [examples/ci/README.md](../examples/ci/README.md).
 Everything else stays the same.
 
 ## Troubleshooting
