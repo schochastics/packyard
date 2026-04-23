@@ -26,8 +26,8 @@ The `build-binary` job ships with two example cells:
 ```yaml
 matrix:
   cell:
-    - { name: ubuntu-22.04-amd64-r4.4, image: ghcr.io/rocker-org/r-ver:4.4 }
-    - { name: ubuntu-24.04-amd64-r4.5, image: ghcr.io/rocker-org/r-ver:4.5 }
+    - { name: ubuntu-24.04-amd64-r-4.4, image: ghcr.io/rocker-org/r-ver:4.4 }
+    - { name: ubuntu-24.04-amd64-r-4.5, image: ghcr.io/rocker-org/r-ver:4.5 }
 ```
 
 Every `cell.name` must also exist in the server's `matrix.yaml` — the

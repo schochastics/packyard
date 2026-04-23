@@ -152,10 +152,10 @@ Default shipped by `pakman-server -init`:
 
 ```yaml
 cells:
-  - { name: ubuntu-22.04-amd64-r-4.4, os: linux, os_version: ubuntu-22.04, arch: amd64, r_minor: "4.4" }
-  - { name: ubuntu-22.04-arm64-r-4.4, os: linux, os_version: ubuntu-22.04, arch: arm64, r_minor: "4.4" }
-  - { name: ubuntu-22.04-amd64-r-4.3, os: linux, os_version: ubuntu-22.04, arch: amd64, r_minor: "4.3" }
-  - { name: ubuntu-22.04-arm64-r-4.3, os: linux, os_version: ubuntu-22.04, arch: arm64, r_minor: "4.3" }
+  - { name: ubuntu-24.04-amd64-r-4.5, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.5" }
+  - { name: ubuntu-24.04-arm64-r-4.5, os: linux, os_version: ubuntu-24.04, arch: arm64, r_minor: "4.5" }
+  - { name: ubuntu-24.04-amd64-r-4.4, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.4" }
+  - { name: ubuntu-24.04-arm64-r-4.4, os: linux, os_version: ubuntu-24.04, arch: arm64, r_minor: "4.4" }
 ```
 
 ### Field reference
@@ -164,7 +164,7 @@ cells:
 |---|---|---|
 | `name` | yes | `[a-z0-9]([a-z0-9.-]*[a-z0-9])?`, max 127 chars. |
 | `os` | yes | `linux`, `darwin`, `windows` (only `linux` is served over the binary URL in v1). |
-| `os_version` | yes | Free-form label, e.g. `ubuntu-22.04`, `debian-12`, `rhel-9`. |
+| `os_version` | yes | Free-form label, e.g. `ubuntu-24.04`, `debian-12`, `rhel-9`. |
 | `arch` | yes | `amd64`, `arm64`, `i386`. |
 | `r_minor` | yes | `MAJOR.MINOR` string (`"4.4"`, not `"4.4.1"` — R binaries are minor-version-pinned). Quote it to keep YAML from parsing as a float. |
 
@@ -174,22 +174,22 @@ cells:
 
 ```yaml
 cells:
-  - { name: ubuntu-22.04-amd64-r-4.4, os: linux, os_version: ubuntu-22.04, arch: amd64, r_minor: "4.4" }
-  - { name: rhel-9-amd64-r-4.4,      os: linux, os_version: rhel-9,       arch: amd64, r_minor: "4.4" }
+  - { name: ubuntu-24.04-amd64-r-4.5, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.5" }
+  - { name: rhel-9-amd64-r-4.5,      os: linux, os_version: rhel-9,       arch: amd64, r_minor: "4.5" }
 ```
 
-**Add a new R minor** (R 4.5 alongside existing 4.4):
+**Add a new R minor** (R 4.6 alongside existing 4.5):
 
 ```yaml
 cells:
-  - { name: ubuntu-22.04-amd64-r-4.4, os: linux, os_version: ubuntu-22.04, arch: amd64, r_minor: "4.4" }
-  - { name: ubuntu-22.04-amd64-r-4.5, os: linux, os_version: ubuntu-22.04, arch: amd64, r_minor: "4.5" }
+  - { name: ubuntu-24.04-amd64-r-4.5, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.5" }
+  - { name: ubuntu-24.04-amd64-r-4.6, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.6" }
 ```
 
 After committing and restarting:
 
 - Existing packages get zero coverage for the new cell — `pakman-server
-  admin cells show ubuntu-22.04-amd64-r-4.5` prints the gap list.
+  admin cells show ubuntu-24.04-amd64-r-4.6` prints the gap list.
 - Subsequent CI runs that include the cell will fill the gap over time.
 
 ### Relationship to the CI workflow

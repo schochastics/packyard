@@ -200,8 +200,8 @@ Manifest schema (strict — unknown fields are rejected):
   "source": "source",
   "description_version": "1.0.0",
   "binaries": [
-    {"cell": "ubuntu-22.04-amd64-r4.4", "part": "bin_ubuntu_22"},
-    {"cell": "ubuntu-24.04-amd64-r4.5", "part": "bin_ubuntu_24"}
+    {"cell": "ubuntu-24.04-amd64-r-4.4", "part": "bin_r_44"},
+    {"cell": "ubuntu-24.04-amd64-r-4.5", "part": "bin_r_45"}
   ]
 }
 ```

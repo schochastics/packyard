@@ -46,8 +46,8 @@ jobs:
       fail-fast: false
       matrix:
         cell:
-          - { name: ubuntu-22.04-amd64-r4.4, image: ghcr.io/rocker-org/r-ver:4.4 }
-          - { name: ubuntu-24.04-amd64-r4.5, image: ghcr.io/rocker-org/r-ver:4.5 }
+          - { name: ubuntu-24.04-amd64-r-4.4, image: ghcr.io/rocker-org/r-ver:4.4 }
+          - { name: ubuntu-24.04-amd64-r-4.5, image: ghcr.io/rocker-org/r-ver:4.5 }
     container: { image: "${{ matrix.cell.image }}" }
     steps:
       - uses: actions/download-artifact@v4

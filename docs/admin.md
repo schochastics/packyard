@@ -115,8 +115,8 @@ uploaded bytes.
 ```sh
 $ pakman-server admin -data ./data cells list
 CELL                       OS                  ARCH   R    BINARIES  COVERAGE  SIZE
-ubuntu-22.04-amd64-r-4.4   linux ubuntu-22.04  amd64  4.4  40        40/42     512 MiB
-ubuntu-22.04-arm64-r-4.4   linux ubuntu-22.04  arm64  4.4  38        38/42     498 MiB
+ubuntu-24.04-amd64-r-4.5   linux ubuntu-24.04  amd64  4.5  40        40/42     512 MiB
+ubuntu-24.04-arm64-r-4.5   linux ubuntu-24.04  arm64  4.5  38        38/42     498 MiB
 ```
 
 ### `admin cells show <cell-name>`
@@ -126,11 +126,11 @@ binary for that cell. Targets the "added a new cell, which packages
 still need to build?" workflow.
 
 ```sh
-$ pakman-server admin -data ./data cells show rhel-9-amd64-r-4.4
-cell rhel-9-amd64-r-4.4
+$ pakman-server admin -data ./data cells show rhel-9-amd64-r-4.5
+cell rhel-9-amd64-r-4.5
   os     linux rhel-9
   arch   amd64
-  r      4.4
+  r      4.5
 
 CHANNEL  PACKAGE  VERSION  PUBLISHED
 prod     foo      1.0.0    2026-04-18 14:23:11
@@ -195,7 +195,7 @@ Missing blobs are printed as a table:
 ```
 CHANNEL  PACKAGE  VERSION  COLUMN                          SHA256
 prod     foo      1.0.0    source                          abc…
-prod     foo      1.0.0    binary/ubuntu-22.04-amd64-r-4.4  def…
+prod     foo      1.0.0    binary/ubuntu-24.04-amd64-r-4.5  def…
 ```
 
 Non-zero exit when any mismatches are found, so the command composes

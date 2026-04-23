@@ -5,35 +5,35 @@
 # identifiers. Renames require repushing binaries under the new name.
 #
 # The default matrix below matches the most common R deployment targets:
-# Ubuntu 22.04 LTS on amd64 + arm64 for current R (4.4 and 4.3).
+# Ubuntu 24.04 LTS on amd64 + arm64 for current R (4.5 and 4.4).
 # Add rows for RHEL, Debian, macOS, or older R minors as your team needs.
 #
 # os:      linux | darwin | windows
 # arch:    amd64 | arm64 | i386
-# r_minor: MAJOR.MINOR (e.g. "4.4"; NOT "4.4.1" — R binaries are pinned
+# r_minor: MAJOR.MINOR (e.g. "4.5"; NOT "4.5.1" — R binaries are pinned
 #          at minor-version granularity)
 
 cells:
-  - name: ubuntu-22.04-amd64-r-4.4
+  - name: ubuntu-24.04-amd64-r-4.5
     os: linux
-    os_version: ubuntu-22.04
+    os_version: ubuntu-24.04
+    arch: amd64
+    r_minor: "4.5"
+
+  - name: ubuntu-24.04-arm64-r-4.5
+    os: linux
+    os_version: ubuntu-24.04
+    arch: arm64
+    r_minor: "4.5"
+
+  - name: ubuntu-24.04-amd64-r-4.4
+    os: linux
+    os_version: ubuntu-24.04
     arch: amd64
     r_minor: "4.4"
 
-  - name: ubuntu-22.04-arm64-r-4.4
+  - name: ubuntu-24.04-arm64-r-4.4
     os: linux
-    os_version: ubuntu-22.04
+    os_version: ubuntu-24.04
     arch: arm64
     r_minor: "4.4"
-
-  - name: ubuntu-22.04-amd64-r-4.3
-    os: linux
-    os_version: ubuntu-22.04
-    arch: amd64
-    r_minor: "4.3"
-
-  - name: ubuntu-22.04-arm64-r-4.3
-    os: linux
-    os_version: ubuntu-22.04
-    arch: arm64
-    r_minor: "4.3"
