@@ -1,10 +1,22 @@
 # 5-minute quickstart
 
 Zero to "R installs your first internal package from pakman" in roughly
-five copy-pasteable commands. Assumes Docker + curl + `R` on the local
+five copy-pasteable commands. Pick the install path that fits:
+
+- **[Docker](#docker)** — one `docker run` and you're done; recommended
+  once release images are published.
+- **[From source](#from-source)** — clone, `make build`, run the
+  binary. Right for kicking the tyres before the first tagged release.
+
+Either path needs `curl`, `jq`, and (for step 4) `R` on the local
 machine.
 
-## 1. Start pakman
+## Docker
+
+> The official `ghcr.io/schochastics/pakman` image ships with the first
+> tagged release. Until then, use [From source](#from-source).
+
+### 1. Start pakman
 
 ```sh
 docker run --rm -d --name pakman \
@@ -18,11 +30,45 @@ Pakman runs in the foreground of the container with WAL-mode SQLite at
 Default channels `dev` / `test` / `prod` are created on first start; see
 [config.md](config.md) to change them.
 
-## 2. Mint an admin token
+### 2. Mint an admin token
 
 ```sh
 ADMIN=$(docker exec pakman pakman-server \
   -mint-token -data /data -scopes admin -label bootstrap 2>/dev/null)
+echo "$ADMIN"
+```
+
+(Skip to [step 3](#3-mint-a-publish-token-for-ci).)
+
+## From source
+
+Needs Go 1.22+ installed. Everything runs under a throwaway `./tmpdata/`
+dir so it won't collide with an existing pakman install.
+
+### 1. Build and start pakman
+
+```sh
+git clone https://github.com/schochastics/pakman.git
+cd pakman
+make build
+
+# Bootstrap the data dir (creates db.sqlite, cas/, default configs).
+./pakman-server -init -data ./tmpdata
+
+# Start the server in the background.
+./pakman-server -data ./tmpdata &
+SERVER_PID=$!
+sleep 0.5
+```
+
+Kill the server with `kill $SERVER_PID` when you're done, and
+`rm -rf ./tmpdata` to wipe the throwaway state.
+
+### 2. Mint an admin token
+
+```sh
+ADMIN=$(./pakman-server -mint-token -data ./tmpdata \
+  -scopes admin -label bootstrap 2>/dev/null)
 echo "$ADMIN"
 ```
 
@@ -119,6 +165,13 @@ Everything else stays the same.
 - **Can't reach `http://localhost:8080/`** — on Linux with rootless
   Docker, the `-p 8080:8080` mapping may need `--publish=host`. Check
   `docker ps` shows the port mapped, and `curl http://localhost:8080/health`.
+- **`address already in use`** — a previous pakman server is still
+  bound to 8080. `pkill -f pakman-server` (source install) or
+  `docker rm -f pakman` (Docker) before retrying.
+- **No R on this machine** — `R CMD build` in step 4 needs an R
+  install. If you're only smoke-testing the publish endpoint, swap the
+  scaffold step for any existing `.tar.gz`; the server takes arbitrary
+  bytes and doesn't parse R tarballs.
 - **`jq` not installed** — the `tok=$(... | jq -r .token)` step needs
   jq. Install it or grep the JSON manually.
 
