@@ -47,6 +47,7 @@ func main() {
 		mintToken   = flag.Bool("mint-token", false, "issue a new API token and exit (prints plaintext once)")
 		tokenScopes = flag.String("scopes", "", "comma-separated scopes for -mint-token (e.g. 'publish:*,read:*,admin')")
 		tokenLabel  = flag.String("label", "", "human-readable label for -mint-token")
+		allowAnon   = flag.Bool("allow-anonymous-reads", false, "open the default channel's CRAN-protocol reads to anonymous clients (overrides allow_anonymous_reads in server.yaml)")
 	)
 	flag.Parse()
 
@@ -62,6 +63,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "pakman-server: config: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Flag overrides YAML, but only when the user actually passed it —
+	// flag.Bool's zero value is false, which we can't distinguish from
+	// "-allow-anonymous-reads=false" without flag.Visit.
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "allow-anonymous-reads" {
+			cfg.AllowAnonymousReads = *allowAnon
+		}
+	})
 
 	switch {
 	case *initStorage:

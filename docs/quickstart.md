@@ -22,13 +22,21 @@ machine.
 docker run --rm -d --name pakman \
   -p 8080:8080 \
   -v pakman-data:/data \
-  ghcr.io/schochastics/pakman:latest
+  ghcr.io/schochastics/pakman:latest \
+  pakman-server -data /data -allow-anonymous-reads
 ```
 
 Pakman runs in the foreground of the container with WAL-mode SQLite at
 `/data/db.sqlite` and a content-addressed blob store under `/data/cas/`.
 Default channels `dev` / `test` / `prod` are created on first start; see
 [config.md](config.md) to change them.
+
+`-allow-anonymous-reads` opens the **default channel only** to
+unauthenticated CRAN-protocol reads so R's `install.packages()` can
+fetch without a bearer token. Non-default channels (`dev`, `test`)
+stay scoped. For production, remove the flag and have R clients supply
+a token via a custom download method — see [config.md](config.md) and
+[admin.md](admin.md).
 
 ### 2. Mint an admin token
 
@@ -56,10 +64,16 @@ make build
 ./pakman-server -init -data ./tmpdata
 
 # Start the server in the background.
-./pakman-server -data ./tmpdata &
+./pakman-server -data ./tmpdata -allow-anonymous-reads &
 SERVER_PID=$!
 sleep 0.5
 ```
+
+`-allow-anonymous-reads` is what makes step 5 (R `install.packages()`)
+work without a token — it opens the **default channel only** to
+unauthenticated CRAN-protocol reads. Non-default channels (`dev`,
+`test`) stay scoped. See [config.md](config.md) and
+[admin.md](admin.md) for the production pattern.
 
 Kill the server with `kill $SERVER_PID` when you're done, and
 `rm -rf ./tmpdata` to wipe the throwaway state.
@@ -162,6 +176,11 @@ Everything else stays the same.
 - **409 on republish** — channel is immutable and the version already
   exists with different bytes. Bump `Version:` in DESCRIPTION, or
   publish to a mutable channel (default: `dev`, `test`).
+- **R says `cannot open URL '…/src/contrib/PACKAGES'`** — R sends no
+  bearer token, and pakman's default config rejects anonymous reads
+  with 401. Restart the server with `-allow-anonymous-reads` (or set
+  `allow_anonymous_reads: true` in `server.yaml`). Only the default
+  channel becomes public; `dev` / `test` stay scoped.
 - **Can't reach `http://localhost:8080/`** — on Linux with rootless
   Docker, the `-p 8080:8080` mapping may need `--publish=host`. Check
   `docker ps` shows the port mapped, and `curl http://localhost:8080/health`.

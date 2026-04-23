@@ -25,6 +25,15 @@ shutdown; in-flight publishes get a chance to finish.
 
 Prints the version string and exits.
 
+### `pakman-server -data <dir> -allow-anonymous-reads`
+
+Starts the server with `allow_anonymous_reads` forced on regardless of
+what `server.yaml` says. Opens the **default channel only** to
+unauthenticated CRAN-protocol reads — useful for local smoke tests
+and for deployments that want `install.packages()` to work without R
+clients carrying a bearer token. Non-default channels stay scoped.
+See [config.md](config.md) for the YAML equivalent.
+
 ### `pakman-server -mint-token -data <dir> -scopes <csv> [-label <s>]`
 
 Creates a token directly against the DB without touching the HTTP

@@ -41,7 +41,8 @@ tls_cert: ""
 tls_key:  ""
 
 # Default channel's CRAN-protocol reads are public when true. Every
-# non-CRAN endpoint still requires a token.
+# non-CRAN endpoint still requires a token. The CLI flag
+# -allow-anonymous-reads overrides this — see admin.md.
 allow_anonymous_reads: false
 ```
 
