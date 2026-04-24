@@ -35,6 +35,13 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	q.Add("_pragma", "foreign_keys(ON)")
 	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "synchronous(NORMAL)")
+	// Every BeginTx in this codebase wraps a write (publish, yank,
+	// delete, migration) — readers use QueryContext directly. Ask
+	// the driver to issue BEGIN IMMEDIATE so concurrent writers
+	// serialize on the RESERVED lock up front instead of racing to
+	// upgrade from DEFERRED and dropping into SQLITE_BUSY_DEADLOCK,
+	// which busy_timeout alone cannot recover from.
+	q.Add("_txlock", "immediate")
 	dsn := "file:" + path + "?" + q.Encode()
 
 	sqlDB, err := sql.Open("sqlite", dsn)
