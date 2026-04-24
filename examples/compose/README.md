@@ -96,7 +96,23 @@ Code changes now trigger a rebuild instead of pulling from GHCR.
 ## Production hardening
 
 The shipped compose file is tuned for evaluation. Before pointing
-real users at it, make these changes:
+real users at it, review the changes below. Note that **"production"
+doesn't automatically mean "token-gated reads"** — public CRAN is
+anonymous, and most private R registries (PPM, r-universe, drat
+behind nginx) rely on network-layer controls rather than
+CRAN-protocol auth. Pick the shape that matches your deployment:
+
+- **Trusted network** (VPN / internal subnet / corporate SSO proxy
+  in front): leave `-allow-anonymous-reads` on. Network decides who
+  can talk to packyard. This is the more common private-registry
+  pattern and is what the compose file ships with.
+- **Internet-exposed**: drop `-allow-anonymous-reads`, issue
+  per-client `read:<channel>` tokens, and wire them into R via the
+  recipe in §2. Only necessary when you can't put the server on a
+  trusted network.
+
+Everything below applies in both modes except §1 and §2, which only
+matter for the internet-exposed shape.
 
 ### 1. Drop `-allow-anonymous-reads`
 

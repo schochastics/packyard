@@ -609,10 +609,4 @@ Small stuff the release surfaced:
 - Add a one-paragraph "Container tag convention" note to [`README.md`](README.md) or [`docs/api.md`](docs/api.md): git tag is `vX.Y.Z`, GHCR tag is `X.Y.Z` (no `v`). Saves a future user hitting `manifest unknown`.
 - [`CLAUDE.md`](CLAUDE.md) already has this for future Claude sessions; the user-facing equivalent is what's missing.
 
-### F6 (open question — no action yet). Drop `-allow-anonymous-reads` from the shipped compose default
-
-The `examples/compose/docker-compose.yml` ships with anonymous reads on to match the quickstart's zero-friction promise. A production-shaped default would force the operator to mint a token before any install works. Breaking change for evaluators; clearer signal for anyone running this for real.
-
-Don't unilaterally change. If we see anyone using compose in anger and hitting 401s, flip it.
-
 ---
