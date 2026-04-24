@@ -34,21 +34,19 @@ builds:
 
 archives:
   - id: default
-    formats: [tar.gz]
+    formats: [ tar.gz ]
     name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else }}{{ .Arch }}{{ end }}
+      {{ .ProjectName }}_{{ .Version }}_ {{- title .Os }}_ {{- if eq .Arch
+      "amd64" }}x86_64 {{- else }}{{ .Arch }}{{ end }}
     format_overrides:
       - goos: windows
-        formats: [zip]
+        formats: [ zip ]
     files:
       - LICENSE
       - README.md
 
 checksum:
-  name_template: 'checksums.txt'
+  name_template: "checksums.txt"
 
 snapshot:
   # No `+` build-metadata suffix: Docker tag grammar forbids it, and we
@@ -70,10 +68,12 @@ dockers:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
-      - "--label=org.opencontainers.image.description=Single-binary R package registry for internal packages."
+      - "--label=org.opencontainers.image.description=Single-binary R package
+        registry for internal packages."
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.source=https://github.com/schochastics/packyard"
+      - "--label=org.opencontainers.image.source=https://github.com/schochastic\
+        s/packyard"
       - "--label=org.opencontainers.image.licenses=MIT"
   - id: packyard-arm64
     image_templates:
@@ -86,10 +86,12 @@ dockers:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.created={{ .Date }}"
       - "--label=org.opencontainers.image.title={{ .ProjectName }}"
-      - "--label=org.opencontainers.image.description=Single-binary R package registry for internal packages."
+      - "--label=org.opencontainers.image.description=Single-binary R package
+        registry for internal packages."
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.source=https://github.com/schochastics/packyard"
+      - "--label=org.opencontainers.image.source=https://github.com/schochastic\
+        s/packyard"
       - "--label=org.opencontainers.image.licenses=MIT"
 
 docker_manifests:
@@ -107,18 +109,18 @@ changelog:
   use: github
   groups:
     - title: Features
-      regexp: '^feat(\(.+\))?:'
+      regexp: "^feat(\\(.+\\))?:"
       order: 0
     - title: Fixes
-      regexp: '^fix(\(.+\))?:'
+      regexp: "^fix(\\(.+\\))?:"
       order: 1
     - title: Other
       order: 999
   filters:
     exclude:
-      - '^docs:'
-      - '^chore:'
-      - '^test:'
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
       - Merge pull request
       - Merge branch
 
@@ -126,7 +128,7 @@ release:
   github:
     owner: schochastics
     name: packyard
-  draft: true
+  draft: false
   prerelease: auto
   mode: replace
   header: |
