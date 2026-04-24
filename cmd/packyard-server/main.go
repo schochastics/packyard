@@ -210,6 +210,20 @@ func runMintToken(cfg *config.ServerConfig, scopes, label string) error {
 // migration or config load here is fatal — we'd rather refuse to start
 // than serve a half-initialized request surface.
 func runServe(cfg *config.ServerConfig) error {
+	// Auto-bootstrap a fresh data dir so `docker run` / `docker compose
+	// up` Just Work against an empty volume. Only write defaults when
+	// the operator hasn't pointed -config at explicit file paths —
+	// otherwise we'd scatter unused default YAMLs next to the DB.
+	// BootstrapDefaults is idempotent: existing files are left alone.
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		return fmt.Errorf("ensure data dir: %w", err)
+	}
+	if cfg.ChannelsFile == "" && cfg.MatrixFile == "" {
+		if _, err := config.BootstrapDefaults(cfg.DataDir); err != nil {
+			return fmt.Errorf("bootstrap default configs: %w", err)
+		}
+	}
+
 	matrix, err := config.LoadMatrix(cfg.MatrixPath())
 	if err != nil {
 		return fmt.Errorf("load matrix: %w", err)
