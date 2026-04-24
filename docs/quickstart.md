@@ -60,10 +60,9 @@ git clone https://github.com/schochastics/packyard.git
 cd packyard
 make build
 
-# Bootstrap the data dir (creates db.sqlite, cas/, default configs).
-./packyard-server -init -data ./tmpdata
-
-# Start the server in the background.
+# Start the server in the background. A fresh data dir is
+# auto-bootstrapped — db.sqlite, cas/, and default channels.yaml /
+# matrix.yaml are created on first serve.
 ./packyard-server -data ./tmpdata -allow-anonymous-reads &
 SERVER_PID=$!
 sleep 0.5

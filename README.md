@@ -86,6 +86,13 @@ Images are published for each tagged release. The container initialises
 on first start (creates DB, CAS, default configs) and runs as a
 non-root user.
 
+**Tag convention:** the Git tag is `vX.Y.Z`; the GHCR image tag is
+`X.Y.Z` (no `v` prefix — [goreleaser]'s default). Pull
+`ghcr.io/schochastics/packyard:1.0.1`, not `:v1.0.1`. `:latest`
+tracks the most recent release.
+
+[goreleaser]: https://goreleaser.com/
+
 ### Binary
 
 Download the matching tarball from
@@ -93,9 +100,11 @@ Download the matching tarball from
 
 ```sh
 go install github.com/schochastics/packyard/cmd/packyard-server@latest
-packyard-server -init -data ./data
 packyard-server -data ./data
 ```
+
+The data dir is auto-bootstrapped on first start; run `-init`
+explicitly only if you want to mint a token before serving.
 
 The binary is a single static executable; no C runtime required.
 
