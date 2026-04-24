@@ -515,7 +515,6 @@ Explicitly *not* targeting:
 3. **SQLite WAL + concurrency**: write-heavy periods could contend. Mitigation: keep writes in short tx, use `BEGIN IMMEDIATE` for writes. At v1 scale this is unlikely to bite.
 4. **Distroless image missing things**: sometimes packages want `ca-certificates` or similar. Mitigation: build test — curl the release image against real TLS endpoints during CI.
 5. **Solo maintenance bandwidth post-launch**: the v1.x air-gap feature is the next big thing. Don't over-commit to post-launch features until v1 adoption is real.
-6. **Naming**: `packyard` is almost certainly not unique. A quick name search before tagging v1 prevents a rename later.
 
 ### What's intentionally not in v1 (forward references)
 
