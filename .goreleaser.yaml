@@ -1,9 +1,10 @@
 # GoReleaser config for packyard.
 # https://goreleaser.com
 #
-# Full release is triggered by pushing a v* tag and a matching workflow in
-# .github/workflows/ (to be added in Phase C, see implementation.md §C5).
-# For v1 we ship Linux amd64 + arm64 as primary; Darwin is best-effort.
+# A v* tag push triggers .github/workflows/release.yml, which runs
+# `goreleaser release --clean`. Artifacts: Linux amd64 + arm64 tarballs
+# (primary), Darwin amd64 + arm64 tarballs (best-effort), a multi-arch
+# Docker image on ghcr.io/schochastics/packyard, checksums, and SBOMs.
 
 version: 2
 
@@ -50,10 +51,56 @@ checksum:
   name_template: 'checksums.txt'
 
 snapshot:
-  version_template: "{{ incpatch .Version }}-dev+{{ .ShortCommit }}"
+  # No `+` build-metadata suffix: Docker tag grammar forbids it, and we
+  # want snapshot builds to exercise the same Docker path as releases.
+  version_template: "{{ incpatch .Version }}-dev-{{ .ShortCommit }}"
 
 sboms:
   - artifacts: archive
+
+dockers:
+  - id: packyard-amd64
+    image_templates:
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-amd64"
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile.release
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=Single-binary R package registry for internal packages."
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/schochastics/packyard"
+      - "--label=org.opencontainers.image.licenses=MIT"
+  - id: packyard-arm64
+    image_templates:
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-arm64"
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile.release
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=Single-binary R package registry for internal packages."
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/schochastics/packyard"
+      - "--label=org.opencontainers.image.licenses=MIT"
+
+docker_manifests:
+  - name_template: "ghcr.io/schochastics/packyard:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-amd64"
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/schochastics/packyard:latest"
+    image_templates:
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-amd64"
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-arm64"
 
 changelog:
   sort: asc

@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1
+#
+# Release Dockerfile for packyard-server. GoReleaser builds the binary
+# ahead of time and this Dockerfile just drops it onto distroless. The
+# self-contained build lives in Dockerfile for dev/CI.
+
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY packyard-server /usr/local/bin/packyard-server
+
+USER nonroot:nonroot
+WORKDIR /data
+VOLUME ["/data"]
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/packyard-server"]
