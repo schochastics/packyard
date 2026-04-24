@@ -563,50 +563,26 @@ If all seven steps pass, v1 is real.
 
 ---
 
-## Post-v1 follow-ups (v1.1)
+## Post-v1 follow-ups — shipped in v1.1
 
-Items surfaced by the v1.0.x cut that didn't block release but should land before we attempt v1.x feature work (air-gap + CRAN mirror). Each is small — half-day to one day of focused work. Sequencing is independent; pick on energy.
+Items surfaced by the v1.0.x cut that didn't block release. All five
+landed before v1.1. Kept here as a historical record of what the
+patch release covers; git log has the full detail.
 
-Breaking changes are fine during this window — see [CLAUDE.md](CLAUDE.md).
+| ID | What | Commit |
+|---|---|---|
+| F1 | `BEGIN IMMEDIATE` on write transactions via `_txlock=immediate` DSN flag; closes the Risks §3 gap. Adds `TestConcurrentWritersSerialize`. | `dcd45bc` |
+| F2 | `FuzzPublishManifest` + `FuzzPublishMultipartBody` in `internal/api/`; nightly `.github/workflows/fuzz.yml` at 2 min per target. | `b8b3746` |
+| F3 | `.github/workflows/post-release.yml` — pulls the just-tagged GHCR image, asserts `-version` matches, boots and probes `/health`, auto-opens a regression issue on failure. | `e3d2096` |
+| F4 | `.github/workflows/cran-e2e.yml` — rocker/r-ver:4.4 round trip of `publish` → `install.packages()` → `library()`; nightly. Fixture at `tests/e2e/testpkg/`. | `b94102d` |
+| F5 | Dropped `-init` from quickstart/README now that auto-bootstrap on serve landed; added GHCR tag convention note to the README install section. | `4665cd2` |
 
-### F1. `BEGIN IMMEDIATE` for write transactions
+F6 ("drop `-allow-anonymous-reads` from the shipped compose default")
+was considered and dropped: public CRAN is anonymous; private R
+registries typically rely on network-layer auth rather than
+protocol-level tokens, so the current compose default matches
+reader expectations. See the reframed [examples/compose/README.md](examples/compose/README.md) §Production hardening.
 
-The Risks section flagged this during planning but the mitigation never shipped. Every write site uses `db.BeginTx(ctx, nil)` which starts a *deferred* transaction; the writer only takes `RESERVED` on its first write, which under concurrency with other writers can drop into `SQLITE_BUSY_DEADLOCK` that `busy_timeout(5000)` cannot recover from.
-
-- Code sites: [`internal/api/publish.go`](internal/api/publish.go), [`internal/api/yank.go`](internal/api/yank.go), [`internal/api/delete.go`](internal/api/delete.go), [`internal/db/migrate.go`](internal/db/migrate.go).
-- Fix: wrap write tx in a helper that runs `BEGIN IMMEDIATE` explicitly (sqlite `database/sql` doesn't map `sql.LevelSerializable` onto the right BEGIN verb on `modernc.org/sqlite`; cheapest reliable fix is a raw `_, err := db.ExecContext(ctx, "BEGIN IMMEDIATE")` then build a `*sql.Tx` via the existing connection).
-- Tests: add a concurrent-publish test that fires N parallel unique versions at the same channel and asserts zero 500s. Confirm it deadlocks on today's code before landing the fix.
-
-### F2. Fuzz targets for multipart publish
-
-Committed to this phase by the original plan. Multipart parsing is the most hostile-input surface we ship.
-
-- New file: `internal/api/publish_fuzz_test.go`.
-- Targets: `FuzzPublishMultipartBody` (raw multipart bytes into `handlePublish`), `FuzzPublishManifest` (just the manifest JSON, with a pre-built valid multipart envelope around it).
-- Run under `-fuzz=. -fuzztime=30s` in CI on a nightly schedule — not on every push.
-
-### F3. Release-image smoke test in CI
-
-The v1.0.1 auto-bootstrap bug slipped to GHCR and was caught by hand. A simple post-release job would have caught it in the release pipeline.
-
-- New workflow: `.github/workflows/post-release.yml`, `workflow_run: Release (completed)` trigger.
-- Steps: pull `ghcr.io/schochastics/packyard:${{ github.event.release.tag_name }}`, `docker run -d -p 8080:8080 … -allow-anonymous-reads`, `curl /health` with retry-until-200, `docker run --rm <image> -version` and grep the tag.
-- On failure: open a release-regression issue automatically.
-
-### F4. `Rscript install.packages()` CI job
-
-Closes the other half of Risk #1 — our current CRAN-protocol test is HTTP/byte-level, not a real R client round-trip. Low probability of surprise given real users already install from a live packyard, but cheap and definitive.
-
-- New job in `.github/workflows/ci.yml` using `rocker/r-ver:4.4`.
-- Boot a packyard container, publish a minimal test package with curl, then `R -e 'install.packages("testpkg", repos="http://packyard:8080/")'` and assert the install succeeded and the library loads.
-- Isolate in a docker-compose-shaped network; no host R install needed.
-
-### F5. Doc drift cleanup
-
-Small stuff the release surfaced:
-
-- [`docs/quickstart.md`](docs/quickstart.md) "From source" path tells the reader to run `-init` separately. Auto-bootstrap on `runServe` landed in v1.0.1 — decide: keep `-init` as explicit (doc accurate either way) or drop it to match the Docker one-liner. Pick one, update.
-- Add a one-paragraph "Container tag convention" note to [`README.md`](README.md) or [`docs/api.md`](docs/api.md): git tag is `vX.Y.Z`, GHCR tag is `X.Y.Z` (no `v`). Saves a future user hitting `manifest unknown`.
-- [`CLAUDE.md`](CLAUDE.md) already has this for future Claude sessions; the user-facing equivalent is what's missing.
+Next planning horizon is the committed v1.x roadmap in [design.md](design.md) §12 — air-gap + CRAN mirror, server-side builds, sigstore signing, dated channel snapshots.
 
 ---
