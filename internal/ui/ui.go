@@ -325,6 +325,7 @@ func (h *Handler) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if err := r.ParseForm(); err != nil {
 		http.Redirect(w, r, "/ui/login?invalid=1", http.StatusFound)
 		return

@@ -84,7 +84,7 @@ func (g *GitImporter) Run(ctx context.Context, repoURL, branch string, progress 
 	}
 	tarPath, err := g.Build(ctx, checkout)
 	if err != nil {
-		return nil, fmt.Errorf("R CMD build: %w", err)
+		return nil, fmt.Errorf("running R CMD build: %w", err)
 	}
 
 	f, err := os.Open(tarPath)
@@ -139,7 +139,7 @@ func rCmdBuild(ctx context.Context, sourceDir string) (string, error) {
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("R CMD build: %w", err)
+		return "", fmt.Errorf("running R CMD build: %w", err)
 	}
 
 	matches, err := filepath.Glob(filepath.Join(outDir, "*.tar.gz"))
@@ -147,7 +147,7 @@ func rCmdBuild(ctx context.Context, sourceDir string) (string, error) {
 		return "", err
 	}
 	if len(matches) != 1 {
-		return "", fmt.Errorf("R CMD build produced %d tarballs; expected exactly 1", len(matches))
+		return "", fmt.Errorf("running R CMD build: produced %d tarballs; expected exactly 1", len(matches))
 	}
 	return matches[0], nil
 }

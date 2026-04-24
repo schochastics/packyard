@@ -1,49 +1,71 @@
-# golangci-lint configuration for packyard.
-# See https://golangci-lint.run/usage/configuration/ for all options.
+version: "2"
 run:
-  timeout: 3m
   tests: true
-
 linters:
-  disable-all: true
+  default: none
   enable:
-    - errcheck       # unchecked errors
-    - govet          # stdlib analyzers
-    - ineffassign    # assigned but never used
-    - staticcheck    # comprehensive static analysis
-    - unused         # unused identifiers
-    - gofmt          # standard formatting
-    - goimports      # import grouping / formatting
-    - revive         # style (replacement for golint)
-    - misspell       # typos in comments
-    - unconvert      # unnecessary type conversions
-    - gosec          # security issues
-    - bodyclose      # unclosed http response bodies
-
-linters-settings:
-  revive:
+    - bodyclose
+    - errcheck
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - unconvert
+    - unused
+  settings:
+    gosec:
+      excludes:
+        # G104: unchecked errors — noisy, already covered by errcheck.
+        - G104
+        # G122: filepath.Walk TOCTOU. The CAS directory is owned by the
+        # server and contains only regular files written atomically by
+        # us; there are no untrusted symlinks to race against.
+        - G122
+        # G705: XSS via taint analysis. Fires on the CRAN protocol
+        # handlers that serve server-generated PACKAGES indexes and
+        # CAS tarball bytes with explicit non-HTML Content-Type. No
+        # HTML rendering path exists.
+        - G705
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: package-comments
+        - name: error-return
+        - name: error-naming
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: exported
-      - name: var-naming
-      - name: package-comments
-      - name: error-return
-      - name: error-naming
-  gosec:
-    excludes:
-      - G104  # errors.New; noisy and mostly covered by errcheck
-  misspell:
-    locale: US
-
+      - linters:
+          - gosec
+        path: cmd/
+      - linters:
+          - errcheck
+          - gosec
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-rules:
-    # Allow fmt.Println, os.Exit etc. in main
-    - path: cmd/
-      linters:
-        - gosec
-    # Tests may have long funcs, duplicated setup
-    - path: _test\.go
-      linters:
-        - gosec
-        - errcheck
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
