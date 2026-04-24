@@ -1,0 +1,37 @@
+# Minimal packyard deployment via Docker Compose.
+#
+# `docker compose up -d` launches packyard on :8080 with a persistent
+# named volume for the data directory. See README.md in this folder
+# for how to mint an admin token and harden for production.
+
+services:
+  packyard:
+    image: ghcr.io/schochastics/packyard:latest
+    # For a local dev loop (rebuild from source on changes), comment out
+    # the `image:` line above and uncomment the block below:
+    # build:
+    #   context: ../..
+    #   dockerfile: Dockerfile
+    container_name: packyard
+    command:
+      - "-data"
+      - "/data"
+      # Opens the default channel to unauthenticated CRAN-protocol reads
+      # so R's install.packages() works out of the box. Remove for
+      # production — see README.md §Production hardening.
+      - "-allow-anonymous-reads"
+    ports:
+      - "8080:8080"
+    volumes:
+      - packyard-data:/data
+    restart: unless-stopped
+    healthcheck:
+      # Distroless has no curl/wget; shell out to the binary itself.
+      test: ["CMD", "/usr/local/bin/packyard-server", "-version"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  packyard-data:

@@ -112,6 +112,7 @@ The binary is a single static executable; no C runtime required.
 | [design.md](design.md) | Architecture and scope. |
 | [implementation.md](implementation.md) | Phased build plan and status. |
 | [examples/ci/README.md](examples/ci/README.md) | Reference CI workflow. |
+| [examples/compose/README.md](examples/compose/README.md) | `docker compose up` template and production hardening. |
 
 The OpenAPI spec is also served at `/api/v1/openapi.json` (and
 `.yaml`) from any running packyard.
