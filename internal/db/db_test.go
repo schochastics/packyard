@@ -113,7 +113,7 @@ func TestConcurrentWritersSerialize(t *testing.T) {
 		wg.Add(1)
 		go func(x int) {
 			defer wg.Done()
-			<-start // release all writers simultaneously to maximise contention
+			<-start // release all writers simultaneously to maximize contention
 			tx, err := database.BeginTx(ctx, nil)
 			if err != nil {
 				errs <- err
