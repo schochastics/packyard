@@ -107,6 +107,7 @@ The binary is a single static executable; no C runtime required.
 | [api.md](docs/api.md) | HTTP API reference, curl examples, error codes. |
 | [config.md](docs/config.md) | `channels.yaml`, `matrix.yaml`, server config. |
 | [admin.md](docs/admin.md) | `packyard-server admin …` commands. |
+| [backup-restore.md](docs/backup-restore.md) | Snapshots, rsync cadence, and restore verification. |
 | [migration.md](docs/migration.md) | Moving from drat or git to packyard. |
 | [design.md](design.md) | Architecture and scope. |
 | [implementation.md](implementation.md) | Phased build plan and status. |
