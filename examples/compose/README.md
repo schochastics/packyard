@@ -185,8 +185,9 @@ packyard.corp {
 ### 4. Pin the image tag
 
 Replace `ghcr.io/schochastics/packyard:latest` with a specific
-version tag (e.g. `:v1.0.0`) so a redeploy never surprises you with
-an unintended upgrade.
+version tag (e.g. `:1.0.1` — GHCR tags have no `v` prefix; the
+matching Git tag on GitHub does) so a redeploy never surprises
+you with an unintended upgrade.
 
 ### 5. Back up the volume
 
