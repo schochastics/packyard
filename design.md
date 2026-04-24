@@ -97,6 +97,8 @@ Packyard is a focused OSS project serving a real but narrow niche. It is not try
 
 ### 1.1 v1 launch deliverables
 
+> **Status (April 2026):** all eight deliverables shipped in v1.0.x. See [implementation.md](implementation.md) for the phase-by-phase build record and `§Post-v1 follow-ups (v1.1)` for residual items.
+
 A full v1 release is more than the server binary. First-hour friction kills adoption faster than missing features, so the v1 bundle includes adoption-critical tooling alongside the server:
 
 1. **`packyard-server`** — single Go binary with embedded static assets (HTML templates, CSS, OpenAPI spec). Linux amd64 at launch; arm64 close behind.

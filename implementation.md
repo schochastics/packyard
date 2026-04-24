@@ -510,11 +510,13 @@ Explicitly *not* targeting:
 
 ### Risks
 
-1. **CRAN-protocol gotchas**: R's expectations of `PACKAGES` file structure and URL shapes have undocumented corners. Mitigation: the CRAN-protocol smoke test in A5 is the early-warning system. Expect 1–2 days of debugging this during A5.
-2. **Multipart edge cases**: giant uploads, slow clients, malformed manifests. Mitigation: integration tests for common failure modes in A4.
-3. **SQLite WAL + concurrency**: write-heavy periods could contend. Mitigation: keep writes in short tx, use `BEGIN IMMEDIATE` for writes. At v1 scale this is unlikely to bite.
-4. **Distroless image missing things**: sometimes packages want `ca-certificates` or similar. Mitigation: build test — curl the release image against real TLS endpoints during CI.
-5. **Solo maintenance bandwidth post-launch**: the v1.x air-gap feature is the next big thing. Don't over-commit to post-launch features until v1 adoption is real.
+Status updated after the v1.0.x cut:
+
+1. **CRAN-protocol gotchas**: R's expectations of `PACKAGES` file structure and URL shapes have undocumented corners. Mitigation: the CRAN-protocol smoke test in A5 is the early-warning system. Expect 1–2 days of debugging this during A5. — **Mostly mitigated.** HTTP-level compliance is covered by [`cran_protocol_test.go`](internal/api/cran_protocol_test.go) and a real R client has installed packages against a deployed packyard. The rocker-based `Rscript install.packages()` CI job never landed; tracked as a v1.1 item.
+2. **Multipart edge cases**: giant uploads, slow clients, malformed manifests. Mitigation: integration tests for common failure modes in A4. — **Mitigated.** `http.MaxBytesReader` caps publish uploads at 2 GiB ([`publish.go`](internal/api/publish.go)); `publish_test.go` covers happy and sad paths. Fuzz deferred to v1.1 as planned.
+3. **SQLite WAL + concurrency**: write-heavy periods could contend. Mitigation: keep writes in short tx, use `BEGIN IMMEDIATE` for writes. At v1 scale this is unlikely to bite. — **Partial — live gap.** WAL + `busy_timeout(5000)` + foreign keys are set in [`db.go`](internal/db/db.go), but every write site still uses `BeginTx(ctx, nil)` which starts a deferred tx. Under concurrent writes this can surface `SQLITE_BUSY_DEADLOCK` that `busy_timeout` alone can't resolve. Tracked as v1.1 item 1.
+4. **Distroless image missing things**: sometimes packages want `ca-certificates` or similar. Mitigation: build test — curl the release image against real TLS endpoints during CI. — **Mitigated.** Released images run clean on arm64 + amd64; `-version` smoke-tested in the release workflow.
+5. **Solo maintenance bandwidth post-launch**: the v1.x air-gap feature is the next big thing. Don't over-commit to post-launch features until v1 adoption is real. — **Active concern.** Manage by keeping v1.1 scope to the five follow-ups below.
 
 ### What's intentionally not in v1 (forward references)
 
@@ -558,3 +560,59 @@ After implementation, verify end-to-end by:
 7. Running `packyard-server admin gc` after a couple of dev-channel overwrites and seeing disk reclaimed.
 
 If all seven steps pass, v1 is real.
+
+---
+
+## Post-v1 follow-ups (v1.1)
+
+Items surfaced by the v1.0.x cut that didn't block release but should land before we attempt v1.x feature work (air-gap + CRAN mirror). Each is small — half-day to one day of focused work. Sequencing is independent; pick on energy.
+
+Breaking changes are fine during this window — see [CLAUDE.md](CLAUDE.md).
+
+### F1. `BEGIN IMMEDIATE` for write transactions
+
+The Risks section flagged this during planning but the mitigation never shipped. Every write site uses `db.BeginTx(ctx, nil)` which starts a *deferred* transaction; the writer only takes `RESERVED` on its first write, which under concurrency with other writers can drop into `SQLITE_BUSY_DEADLOCK` that `busy_timeout(5000)` cannot recover from.
+
+- Code sites: [`internal/api/publish.go`](internal/api/publish.go), [`internal/api/yank.go`](internal/api/yank.go), [`internal/api/delete.go`](internal/api/delete.go), [`internal/db/migrate.go`](internal/db/migrate.go).
+- Fix: wrap write tx in a helper that runs `BEGIN IMMEDIATE` explicitly (sqlite `database/sql` doesn't map `sql.LevelSerializable` onto the right BEGIN verb on `modernc.org/sqlite`; cheapest reliable fix is a raw `_, err := db.ExecContext(ctx, "BEGIN IMMEDIATE")` then build a `*sql.Tx` via the existing connection).
+- Tests: add a concurrent-publish test that fires N parallel unique versions at the same channel and asserts zero 500s. Confirm it deadlocks on today's code before landing the fix.
+
+### F2. Fuzz targets for multipart publish
+
+Committed to this phase by the original plan. Multipart parsing is the most hostile-input surface we ship.
+
+- New file: `internal/api/publish_fuzz_test.go`.
+- Targets: `FuzzPublishMultipartBody` (raw multipart bytes into `handlePublish`), `FuzzPublishManifest` (just the manifest JSON, with a pre-built valid multipart envelope around it).
+- Run under `-fuzz=. -fuzztime=30s` in CI on a nightly schedule — not on every push.
+
+### F3. Release-image smoke test in CI
+
+The v1.0.1 auto-bootstrap bug slipped to GHCR and was caught by hand. A simple post-release job would have caught it in the release pipeline.
+
+- New workflow: `.github/workflows/post-release.yml`, `workflow_run: Release (completed)` trigger.
+- Steps: pull `ghcr.io/schochastics/packyard:${{ github.event.release.tag_name }}`, `docker run -d -p 8080:8080 … -allow-anonymous-reads`, `curl /health` with retry-until-200, `docker run --rm <image> -version` and grep the tag.
+- On failure: open a release-regression issue automatically.
+
+### F4. `Rscript install.packages()` CI job
+
+Closes the other half of Risk #1 — our current CRAN-protocol test is HTTP/byte-level, not a real R client round-trip. Low probability of surprise given real users already install from a live packyard, but cheap and definitive.
+
+- New job in `.github/workflows/ci.yml` using `rocker/r-ver:4.4`.
+- Boot a packyard container, publish a minimal test package with curl, then `R -e 'install.packages("testpkg", repos="http://packyard:8080/")'` and assert the install succeeded and the library loads.
+- Isolate in a docker-compose-shaped network; no host R install needed.
+
+### F5. Doc drift cleanup
+
+Small stuff the release surfaced:
+
+- [`docs/quickstart.md`](docs/quickstart.md) "From source" path tells the reader to run `-init` separately. Auto-bootstrap on `runServe` landed in v1.0.1 — decide: keep `-init` as explicit (doc accurate either way) or drop it to match the Docker one-liner. Pick one, update.
+- Add a one-paragraph "Container tag convention" note to [`README.md`](README.md) or [`docs/api.md`](docs/api.md): git tag is `vX.Y.Z`, GHCR tag is `X.Y.Z` (no `v`). Saves a future user hitting `manifest unknown`.
+- [`CLAUDE.md`](CLAUDE.md) already has this for future Claude sessions; the user-facing equivalent is what's missing.
+
+### F6 (open question — no action yet). Drop `-allow-anonymous-reads` from the shipped compose default
+
+The `examples/compose/docker-compose.yml` ships with anonymous reads on to match the quickstart's zero-friction promise. A production-shaped default would force the operator to mint a token before any install works. Breaking change for evaluators; clearer signal for anyone running this for real.
+
+Don't unilaterally change. If we see anyone using compose in anger and hitting 401s, flip it.
+
+---
