@@ -1,0 +1,11 @@
+Package: testpkg
+Title: Packyard End-to-End Test Package
+Version: 0.1.0
+Authors@R: person("Packyard", "Maintainers",
+    email = "noreply@example.com", role = c("aut", "cre"))
+Description: Minimal R package used by the CRAN e2e CI workflow to
+    verify that packyard's read surface works with a real R client.
+    Source-only, no compiled code, no dependencies.
+License: MIT + file LICENSE
+Encoding: UTF-8
+RoxygenNote: 7.3.1

@@ -1,0 +1,104 @@
+name: CRAN e2e
+
+# End-to-end test: stand up packyard, publish a minimal R package
+# via the HTTP API, then run install.packages() from a real R
+# container against the packyard URL and load the result. Closes
+# the other half of the original §Risks #1 (the planning-era plan
+# called for this but it never landed).
+#
+# Nightly + manual only. rocker/r-ver is ~600 MB; per-push would be
+# a tax on every PR for no extra signal. The HTTP-level protocol
+# tests in internal/api/cran_protocol_test.go already run on push.
+
+on:
+  schedule:
+    - cron: "37 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: R install.packages() round trip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: Build packyard image
+        run: docker build -t packyard:e2e .
+
+      - name: Boot packyard
+        run: |
+          docker network create e2e
+          docker run -d --name packyard --network e2e \
+            -v packyard-data:/data \
+            packyard:e2e \
+            -data /data -allow-anonymous-reads
+
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 30); do
+            if docker run --rm --network e2e curlimages/curl:8.10.1 \
+                -sf -o /dev/null http://packyard:8080/health; then
+              echo "health ok after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::packyard /health never returned 200"
+          docker logs packyard
+          exit 1
+
+      - name: Mint publish token
+        id: mint
+        run: |
+          token=$(docker exec packyard packyard-server \
+            -mint-token -data /data \
+            -scopes 'publish:*' -label e2e 2>/dev/null)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Build + publish R package
+        env:
+          TOKEN: ${{ steps.mint.outputs.token }}
+        run: |
+          mkdir -p build
+          cp -r tests/e2e/testpkg build/testpkg
+          docker run --rm --network e2e \
+            -v "$PWD/build":/build -w /build \
+            -e TOKEN \
+            rocker/r-ver:4.4 bash -euxc '
+              R CMD build testpkg
+              tarball=$(ls testpkg_*.tar.gz | head -1)
+              apt-get update -qq && apt-get install -qq -y curl >/dev/null
+              # Publish: manifest (no binaries) + source part.
+              curl -sSf -X POST \
+                "http://packyard:8080/api/v1/packages/prod/testpkg/0.1.0" \
+                -H "Authorization: Bearer $TOKEN" \
+                -F "manifest={\"binaries\":[]};type=application/json" \
+                -F "source=@${tarball}"
+            '
+
+      - name: install.packages() round trip
+        run: |
+          docker run --rm --network e2e rocker/r-ver:4.4 Rscript -e '
+            options(repos = c(packyard = "http://packyard:8080/"))
+            # type="source" is explicit — we only publish source
+            # for this test, and some rocker images default to
+            # "both" which tries binaries first.
+            install.packages("testpkg", type = "source")
+            library(testpkg)
+            stopifnot(hello() == "hello from testpkg")
+          '
+
+      - name: Logs on failure
+        if: failure()
+        run: docker logs packyard || true
