@@ -93,6 +93,13 @@ behaviour. `ghcr.io/schochastics/packyard:1.0.1` works;
 - **IDE spelling warnings on `packyard`, `CRAN`, `organisation`, `renv`,
   `runbook` etc. are noise.** The IDE's spell checker flags
   project-specific vocabulary and British English; ignore them.
+- **`[skip ci]` in a commit message suppresses tag-triggered Release
+  runs too.** Learned the hard way on v1.1.0: a `[skip ci] draft
+  off` commit landed on main, the v1.1.0 tag was created on that
+  commit, and Release never fired even though the tag push itself
+  was delivered. If you want to change a build/release config and
+  then tag, either drop `[skip ci]` or add a follow-up commit
+  without it before tagging.
 - **Plan mode re-entry:** when re-entering plan mode, read the
   existing plan file first and overwrite if the new task is distinct
   (this is what system reminders already instruct).
