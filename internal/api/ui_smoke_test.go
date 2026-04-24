@@ -47,7 +47,7 @@ func TestUIMountSmoke(t *testing.T) {
 	if res.StatusCode != http.StatusFound {
 		t.Fatalf("POST /ui/login status = %d", res.StatusCode)
 	}
-	if len(jar.cookies("pakman_ui")) == 0 {
+	if len(jar.cookies("packyard_ui")) == 0 {
 		t.Fatalf("expected session cookie after login")
 	}
 
@@ -72,7 +72,7 @@ func TestUIMountSmoke(t *testing.T) {
 		t.Errorf("POST /ui/logout status = %d", res.StatusCode)
 	}
 	// The MaxAge=-1 cookie wipes the jar entry immediately on merge.
-	if got := jar.get("pakman_ui"); got != "" {
+	if got := jar.get("packyard_ui"); got != "" {
 		t.Errorf("session cookie still present after logout: %q", got)
 	}
 

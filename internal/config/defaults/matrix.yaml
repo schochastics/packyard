@@ -1,4 +1,4 @@
-# pakman binary matrix — the cells for which publishers may upload binaries.
+# packyard binary matrix — the cells for which publishers may upload binaries.
 #
 # Each cell is a (os, os_version, arch, r_minor) combination. The name is
 # what appears in manifest files and URL paths, so pick short, stable

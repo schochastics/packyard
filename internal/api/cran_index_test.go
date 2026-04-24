@@ -7,13 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func setupIndexDB(t *testing.T) *db.DB {
 	t.Helper()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "pakman.sqlite"))
+	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "packyard.sqlite"))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

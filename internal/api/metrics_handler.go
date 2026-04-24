@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// handleMetrics returns the Prometheus scrape endpoint for the pakman
+// handleMetrics returns the Prometheus scrape endpoint for the packyard
 // registry. No auth: /metrics is a standard unauthenticated internal
 // endpoint, same convention as /health. Operators who need to
 // restrict scraping do so at the network layer (firewall, VPC peering,

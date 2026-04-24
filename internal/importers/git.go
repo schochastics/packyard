@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/schochastics/pakman/internal/api"
+	"github.com/schochastics/packyard/internal/api"
 )
 
 // GitImporter clones an R-package git repo, runs `R CMD build`, and
@@ -20,7 +20,7 @@ import (
 //
 // The Clone and Build hooks are fields (not methods) so tests can
 // substitute lightweight stand-ins — the default implementations shell
-// out to real binaries, which CI for pakman itself does not carry.
+// out to real binaries, which CI for packyard itself does not carry.
 type GitImporter struct {
 	Deps    api.Deps
 	Channel string
@@ -57,7 +57,7 @@ type GitResult struct {
 // parses the resulting tarball name to recover (name, version), and
 // imports it. The scratch dir is removed after the call completes.
 func (g *GitImporter) Run(ctx context.Context, repoURL, branch string, progress func(string)) (*GitResult, error) {
-	workdir, err := os.MkdirTemp("", "pakman-import-git-*")
+	workdir, err := os.MkdirTemp("", "packyard-import-git-*")
 	if err != nil {
 		return nil, fmt.Errorf("mktemp: %w", err)
 	}
@@ -129,7 +129,7 @@ func gitClone(ctx context.Context, repoURL, branch, dest string) error {
 // path. R writes the tarball into the CWD — we run in a temp dir and
 // then look for the single *.tar.gz.
 func rCmdBuild(ctx context.Context, sourceDir string) (string, error) {
-	outDir, err := os.MkdirTemp("", "pakman-R-build-*")
+	outDir, err := os.MkdirTemp("", "packyard-R-build-*")
 	if err != nil {
 		return "", err
 	}

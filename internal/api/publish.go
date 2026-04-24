@@ -11,9 +11,9 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/schochastics/pakman/internal/auth"
-	"github.com/schochastics/pakman/internal/cas"
-	"github.com/schochastics/pakman/internal/config"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 // maxRequestBytes caps a single publish upload. 2 GiB is well above the
@@ -183,7 +183,7 @@ func handlePublish(deps Deps) http.HandlerFunc {
 	}
 }
 
-// recordPublishMetric bumps pakman_publish_total with a result label
+// recordPublishMetric bumps packyard_publish_total with a result label
 // that distinguishes created / overwrote / already_existed so dashboards
 // can separate "new versions" from "replay traffic" from "CI overwriting
 // the same dev version 100 times".

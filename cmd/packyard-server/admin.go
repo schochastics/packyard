@@ -10,18 +10,18 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/schochastics/pakman/internal/api"
-	"github.com/schochastics/pakman/internal/cas"
-	"github.com/schochastics/pakman/internal/config"
-	"github.com/schochastics/pakman/internal/importers"
+	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/importers"
 )
 
-// adminMain is the entry point for `pakman-server admin …`. Kept out
+// adminMain is the entry point for `packyard-server admin …`. Kept out
 // of main.go so the imperative shell there stays small.
 //
 // Top-level grammar:
 //
-//	pakman-server admin [-data DIR] [-config PATH] <verb> [args…]
+//	packyard-server admin [-data DIR] [-config PATH] <verb> [args…]
 //
 // where <verb> is one of:
 //
@@ -66,7 +66,7 @@ func adminMain(args []string) error {
 
 // adminReindex verifies that every sha256 referenced by the DB has a
 // matching blob in CAS. It's the v1 answer to "rebuild the indices"
-// from implementation.md §B7 — pakman never persists a PACKAGES file,
+// from implementation.md §B7 — packyard never persists a PACKAGES file,
 // so the meaningful recovery op after a DB/CAS restore is this
 // consistency check, not a literal rebuild.
 //
@@ -96,7 +96,7 @@ func adminReindex(cfg *config.ServerConfig, args []string) error {
 		return err
 	}
 
-	fmt.Println("pakman computes PACKAGES on demand; there is no on-disk index to rebuild.")
+	fmt.Println("packyard computes PACKAGES on demand; there is no on-disk index to rebuild.")
 	fmt.Printf("verified DB -> CAS references. missing blobs: %d\n", len(missing))
 	if len(missing) > 0 {
 		tw := newTabWriter()
@@ -511,7 +511,7 @@ func adminImport(cfg *config.ServerConfig, args []string) error {
 
 func adminImportDrat(cfg *config.ServerConfig, args []string) error {
 	fs := flag.NewFlagSet("admin import drat", flag.ContinueOnError)
-	channel := fs.String("channel", "", "target pakman channel (required)")
+	channel := fs.String("channel", "", "target packyard channel (required)")
 	if err := fs.Parse(reorderFlagsFirst(args)); err != nil {
 		return err
 	}
@@ -550,7 +550,7 @@ func adminImportDrat(cfg *config.ServerConfig, args []string) error {
 
 func adminImportGit(cfg *config.ServerConfig, args []string) error {
 	fs := flag.NewFlagSet("admin import git", flag.ContinueOnError)
-	channel := fs.String("channel", "", "target pakman channel (required)")
+	channel := fs.String("channel", "", "target packyard channel (required)")
 	branch := fs.String("branch", "", "branch or tag to clone (default: repo's default)")
 	if err := fs.Parse(reorderFlagsFirst(args)); err != nil {
 		return err
@@ -657,7 +657,7 @@ func adminUsageError(format string, args ...any) error {
 }
 
 const adminUsageText = `usage:
-  pakman-server admin [-data DIR] [-config PATH] <verb> [args…]
+  packyard-server admin [-data DIR] [-config PATH] <verb> [args…]
 
 verbs:
   import drat <repo-url> -channel <name>

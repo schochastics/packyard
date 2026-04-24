@@ -1,5 +1,5 @@
 -- 001_init.sql
--- Initial pakman schema. See design.md §3 (entities) and implementation.md A2
+-- Initial packyard schema. See design.md §3 (entities) and implementation.md A2
 -- for field-level rationale. Timestamps are ISO-8601 UTC strings ("YYYY-MM-
 -- DDTHH:MM:SS.sssZ") rather than unix seconds so rows are readable with the
 -- sqlite3 CLI during ops/debug.

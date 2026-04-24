@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 func decodeServer(t *testing.T, src string) (*config.ServerConfig, error) {
@@ -66,12 +66,12 @@ func TestDecodeServerValidation(t *testing.T) {
 	}{
 		{
 			name:    "tls cert without key",
-			yaml:    "tls_cert: /etc/pakman/cert.pem",
+			yaml:    "tls_cert: /etc/packyard/cert.pem",
 			wantMsg: "tls_key is empty",
 		},
 		{
 			name:    "tls key without cert",
-			yaml:    "tls_key: /etc/pakman/key.pem",
+			yaml:    "tls_key: /etc/packyard/key.pem",
 			wantMsg: "tls_cert is empty",
 		},
 	}
@@ -93,16 +93,16 @@ func TestDecodeServerValidation(t *testing.T) {
 func TestServerPathHelpers(t *testing.T) {
 	t.Parallel()
 
-	cfg := &config.ServerConfig{DataDir: "/var/lib/pakman"}
-	if got := cfg.ChannelsPath(); got != "/var/lib/pakman/channels.yaml" {
+	cfg := &config.ServerConfig{DataDir: "/var/lib/packyard"}
+	if got := cfg.ChannelsPath(); got != "/var/lib/packyard/channels.yaml" {
 		t.Errorf("ChannelsPath default = %q", got)
 	}
-	if got := cfg.MatrixPath(); got != "/var/lib/pakman/matrix.yaml" {
+	if got := cfg.MatrixPath(); got != "/var/lib/packyard/matrix.yaml" {
 		t.Errorf("MatrixPath default = %q", got)
 	}
 
-	cfg.ChannelsFile = "/etc/pakman/channels.yaml"
-	if got := cfg.ChannelsPath(); got != "/etc/pakman/channels.yaml" {
+	cfg.ChannelsFile = "/etc/packyard/channels.yaml"
+	if got := cfg.ChannelsPath(); got != "/etc/packyard/channels.yaml" {
 		t.Errorf("ChannelsPath override = %q", got)
 	}
 }

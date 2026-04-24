@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/cas"
+	"github.com/schochastics/packyard/internal/cas"
 )
 
 func newStore(t *testing.T) *cas.Store {
@@ -29,7 +29,7 @@ func TestWriteAndReadRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	s := newStore(t)
-	content := []byte("hello pakman")
+	content := []byte("hello packyard")
 	wantSum := sha256.Sum256(content)
 	wantHex := hex.EncodeToString(wantSum[:])
 

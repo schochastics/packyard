@@ -1,4 +1,4 @@
-// Package db opens the pakman SQLite database and runs migrations.
+// Package db opens the packyard SQLite database and runs migrations.
 //
 // The driver is modernc.org/sqlite — a pure-Go port — so the final binary
 // can stay CGO-free and ship as a single static artifact (see Dockerfile,
@@ -16,12 +16,12 @@ import (
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 )
 
-// DB wraps *sql.DB with pakman-specific helpers.
+// DB wraps *sql.DB with packyard-specific helpers.
 type DB struct {
 	*sql.DB
 }
 
-// Open opens (or creates) the pakman SQLite database at path with pragmas
+// Open opens (or creates) the packyard SQLite database at path with pragmas
 // tuned for a low-concurrency server: WAL journalling, foreign keys on,
 // a 5 s busy timeout so writers don't immediately fail under contention,
 // and synchronous=NORMAL — the WAL-recommended setting that trades a

@@ -4,11 +4,11 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/schochastics/pakman/internal/cas"
-	"github.com/schochastics/pakman/internal/config"
-	"github.com/schochastics/pakman/internal/db"
-	"github.com/schochastics/pakman/internal/metrics"
-	"github.com/schochastics/pakman/internal/ui"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/metrics"
+	"github.com/schochastics/packyard/internal/ui"
 )
 
 // Deps is the set of services API handlers reach for. Assembled once at
@@ -26,7 +26,7 @@ type Deps struct {
 }
 
 // NewMux builds the top-level HTTP handler: the http.ServeMux of
-// pakman's routes wrapped in middleware. Callers pass the result to
+// packyard's routes wrapped in middleware. Callers pass the result to
 // http.Server{Handler: ...}.
 //
 // Middleware order (outermost first):
@@ -79,14 +79,14 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/openapi.yaml", handleOpenAPIYAML(deps))
 
 	// CRAN-protocol source surface. {channel} is the first path segment
-	// so `repos = "http://pakman/<channel>"` Just Works with vanilla R —
+	// so `repos = "http://packyard/<channel>"` Just Works with vanilla R —
 	// R's contrib.url() appends "/src/contrib/PACKAGES" on its own.
 	mux.HandleFunc("GET /{channel}/src/contrib/PACKAGES", handleSourcePackages(deps))
 	mux.HandleFunc("GET /{channel}/src/contrib/PACKAGES.gz", handleSourcePackagesGz(deps))
 	mux.HandleFunc("GET /{channel}/src/contrib/{file}", handleSourceTarball(deps))
 
 	// CRAN-protocol binary surface. Only Linux is served directly in
-	// the URL shape; macOS and Windows binaries weren't on pakman's
+	// the URL shape; macOS and Windows binaries weren't on packyard's
 	// v1 target platforms.
 	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/PACKAGES", handleBinaryPackages(deps))
 	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/PACKAGES.gz", handleBinaryPackagesGz(deps))
@@ -128,7 +128,7 @@ func NewMux(deps Deps) http.Handler {
 		}
 	}
 
-	// Default-channel aliases: `repos = "http://pakman/"` works the
+	// Default-channel aliases: `repos = "http://packyard/"` works the
 	// same as naming the default channel explicitly.
 	mux.HandleFunc("GET /src/contrib/PACKAGES", handleDefaultSourcePackages(deps))
 	mux.HandleFunc("GET /src/contrib/PACKAGES.gz", handleDefaultSourcePackagesGz(deps))

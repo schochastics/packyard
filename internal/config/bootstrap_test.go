@@ -7,7 +7,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 func TestEmbeddedDefaultsAreValid(t *testing.T) {

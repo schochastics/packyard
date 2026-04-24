@@ -1,4 +1,4 @@
-// Package auth holds pakman's token and scope primitives.
+// Package auth holds packyard's token and scope primitives.
 //
 // Scopes are strings of the form "verb:target", e.g.
 //

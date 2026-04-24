@@ -1,6 +1,6 @@
 # Configuration reference
 
-Pakman reads three YAML files: `server.yaml` (optional), `channels.yaml`,
+Packyard reads three YAML files: `server.yaml` (optional), `channels.yaml`,
 and `matrix.yaml`. The latter two are bootstrapped on first start with
 sensible defaults and live under the data dir; `server.yaml` is entirely
 optional and only needed once you outgrow the command-line flags.
@@ -24,13 +24,13 @@ The data dir is picked in this order:
 
 ## `server.yaml`
 
-Optional. Point at it with `pakman-server -config /etc/pakman/server.yaml`.
+Optional. Point at it with `packyard-server -config /etc/packyard/server.yaml`.
 Every field is optional; omitted keys fall back to defaults. Strict
 parsing: **unknown keys fail** so a typo can't silently lose a setting.
 
 ```yaml
 listen: ":8080"               # host:port, default ":8080"
-data_dir: "/var/lib/pakman"   # default "./data"
+data_dir: "/var/lib/packyard"   # default "./data"
 
 # Paths resolve relative to the directory of this YAML file if relative.
 channels_file: "channels.yaml"    # default <data_dir>/channels.yaml
@@ -52,16 +52,16 @@ allow_anonymous_reads: false
 - `data_dir` must be non-empty.
 - `tls_cert` and `tls_key` must either both be set or both be empty.
 - Relative paths in the YAML are resolved against the YAML file's
-  directory (not pakman's CWD) so a config placed in `/etc/pakman/`
+  directory (not packyard's CWD) so a config placed in `/etc/packyard/`
   behaves predictably regardless of how the server is launched.
 
 ## `channels.yaml`
 
-Defines the channels pakman serves. A channel is the top-level grouping
+Defines the channels packyard serves. A channel is the top-level grouping
 for versioned packages; think "environment" (`dev`, `test`, `prod`) or
 "scope" (`internal`, `contrib`).
 
-Default shipped by `pakman-server -init`:
+Default shipped by `packyard-server -init`:
 
 ```yaml
 channels:
@@ -105,9 +105,9 @@ channels; bump + yank instead.
 
 Channels reconcile on every server start. Adding a channel is a pure
 addition — restart and it shows up. Renaming or removing a channel is
-**never** auto-destructive: the old DB row stays in place and pakman
+**never** auto-destructive: the old DB row stays in place and packyard
 logs a warning at startup. This keeps operator mistakes recoverable.
-Clean up with `pakman-server admin channels list` and a manual DB
+Clean up with `packyard-server admin channels list` and a manual DB
 edit if you're sure.
 
 ### Common patterns
@@ -148,7 +148,7 @@ for. Names are referenced from publish manifests and from the binary-
 read URL (`/bin/linux/{cell}/…`), so keep them short and stable.
 **Renames require re-publishing.**
 
-Default shipped by `pakman-server -init`:
+Default shipped by `packyard-server -init`:
 
 ```yaml
 cells:
@@ -188,7 +188,7 @@ cells:
 
 After committing and restarting:
 
-- Existing packages get zero coverage for the new cell — `pakman-server
+- Existing packages get zero coverage for the new cell — `packyard-server
   admin cells show ubuntu-24.04-amd64-r-4.6` prints the gap list.
 - Subsequent CI runs that include the cell will fill the gap over time.
 
@@ -203,7 +203,7 @@ authoritative list.
 
 ## Environment variables
 
-Pakman reads no environment variables for runtime config in v1 —
+Packyard reads no environment variables for runtime config in v1 —
 everything comes from YAML + CLI flags. The Docker image sets
 `WORKDIR /data` and `VOLUME /data`; that's it.
 
@@ -214,5 +214,5 @@ in v1 — SIGHUP is ignored. The reconcile logic is deliberately
 simple: channels added, same channels are updated in place (policy or
 default-flag changes apply), channels removed from YAML are NOT
 removed from the DB. Start with a known-good YAML, restart once,
-check `pakman-server admin channels list` before shutting the old
+check `packyard-server admin channels list` before shutting the old
 server down.

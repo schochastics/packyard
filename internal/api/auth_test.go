@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/auth"
-	"github.com/schochastics/pakman/internal/cas"
-	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func newAuthTestDeps(t *testing.T) Deps {
@@ -19,7 +19,7 @@ func newAuthTestDeps(t *testing.T) Deps {
 	ctx := context.Background()
 	dir := t.TempDir()
 
-	database, err := db.Open(ctx, filepath.Join(dir, "pakman.sqlite"))
+	database, err := db.Open(ctx, filepath.Join(dir, "packyard.sqlite"))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

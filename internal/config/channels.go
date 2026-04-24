@@ -1,4 +1,4 @@
-// Package config loads and validates pakman's YAML configuration:
+// Package config loads and validates packyard's YAML configuration:
 // channels.yaml (which channels exist and their overwrite policy),
 // matrix.yaml (which OS/arch/R-minor cells binaries are published for),
 // and the top-level server config.

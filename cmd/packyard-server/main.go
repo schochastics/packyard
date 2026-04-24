@@ -1,6 +1,6 @@
-// Command pakman-server is the pakman package registry server.
+// Command packyard-server is the packyard package registry server.
 //
-// See https://github.com/schochastics/pakman for documentation.
+// See https://github.com/schochastics/packyard for documentation.
 package main
 
 import (
@@ -19,12 +19,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/schochastics/pakman/internal/api"
-	"github.com/schochastics/pakman/internal/auth"
-	"github.com/schochastics/pakman/internal/cas"
-	"github.com/schochastics/pakman/internal/config"
-	"github.com/schochastics/pakman/internal/db"
-	"github.com/schochastics/pakman/internal/version"
+	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/version"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 	// common case (just run the server).
 	if len(os.Args) > 1 && os.Args[1] == "admin" {
 		if err := adminMain(os.Args[2:]); err != nil {
-			fmt.Fprintf(os.Stderr, "pakman-server: %v\n", err)
+			fmt.Fprintf(os.Stderr, "packyard-server: %v\n", err)
 			os.Exit(1)
 		}
 		return
@@ -60,7 +60,7 @@ func main() {
 
 	cfg, err := resolveConfig(*configPath, *dataDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "pakman-server: config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "packyard-server: config: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -76,19 +76,19 @@ func main() {
 	switch {
 	case *initStorage:
 		if err := runInit(cfg); err != nil {
-			fmt.Fprintf(os.Stderr, "pakman-server: init failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "packyard-server: init failed: %v\n", err)
 			os.Exit(1)
 		}
 		return
 	case *mintToken:
 		if err := runMintToken(cfg, *tokenScopes, *tokenLabel); err != nil {
-			fmt.Fprintf(os.Stderr, "pakman-server: mint-token failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "packyard-server: mint-token failed: %v\n", err)
 			os.Exit(1)
 		}
 		return
 	default:
 		if err := runServe(cfg); err != nil {
-			fmt.Fprintf(os.Stderr, "pakman-server: serve failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "packyard-server: serve failed: %v\n", err)
 			os.Exit(1)
 		}
 	}
@@ -198,7 +198,7 @@ func runMintToken(cfg *config.ServerConfig, scopes, label string) error {
 	}
 
 	// Deliberately print JUST the token, unadorned, so shell pipelines
-	// like `TOKEN=$(pakman-server -mint-token ...)` work cleanly. Other
+	// like `TOKEN=$(packyard-server -mint-token ...)` work cleanly. Other
 	// context goes to stderr.
 	fmt.Fprintf(os.Stderr, "issued token label=%q scopes=%q\n", label, scopes)
 	fmt.Println(plaintext)
@@ -267,7 +267,7 @@ func runServe(cfg *config.ServerConfig) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("pakman-server listening",
+		slog.Info("packyard-server listening",
 			"addr", cfg.Listen,
 			"tls", cfg.TLSEnabled(),
 			"version", version.Version,
@@ -294,7 +294,7 @@ func runServe(cfg *config.ServerConfig) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
-	slog.Info("pakman-server stopped")
+	slog.Info("packyard-server stopped")
 	return nil
 }
 

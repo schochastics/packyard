@@ -24,11 +24,11 @@ func TestMetricsEndpointServesPrometheus(t *testing.T) {
 	body := rec.Body.String()
 
 	// The custom HTTP counter should be present and non-zero.
-	if !strings.Contains(body, "pakman_http_requests_total") {
-		t.Errorf("pakman_http_requests_total missing: %s", body)
+	if !strings.Contains(body, "packyard_http_requests_total") {
+		t.Errorf("packyard_http_requests_total missing: %s", body)
 	}
 	// Histogram emits _count / _sum / _bucket lines.
-	if !strings.Contains(body, "pakman_http_request_duration_seconds") {
+	if !strings.Contains(body, "packyard_http_request_duration_seconds") {
 		t.Errorf("duration histogram missing: %s", body)
 	}
 	// Process + go runtime collectors should be there too.

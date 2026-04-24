@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/auth"
-	"github.com/schochastics/pakman/internal/config"
-	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func newTestHandler(t *testing.T) (*Handler, *db.DB) {
@@ -21,7 +21,7 @@ func newTestHandler(t *testing.T) (*Handler, *db.DB) {
 	ctx := context.Background()
 	dir := t.TempDir()
 
-	database, err := db.Open(ctx, filepath.Join(dir, "pakman.sqlite"))
+	database, err := db.Open(ctx, filepath.Join(dir, "packyard.sqlite"))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

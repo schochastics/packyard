@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/config"
-	"github.com/schochastics/pakman/internal/importers"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/importers"
 )
 
 func TestGitImporterHappyPath(t *testing.T) {

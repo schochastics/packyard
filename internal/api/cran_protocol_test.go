@@ -18,7 +18,7 @@ import (
 // an R package (real DESCRIPTION + NAMESPACE inside a gzipped tar),
 // then fetch PACKAGES, parse it, and download the tarball over HTTP
 // from a live httptest.Server. Success means every URL R would hit
-// for `install.packages("pakmantest", repos = "http://pakman/<channel>/")`
+// for `install.packages("packyardtest", repos = "http://packyard/<channel>/")`
 // returns sensible bytes.
 //
 // We don't actually untar-and-install — that would require R in the
@@ -32,7 +32,7 @@ func TestCRANProtocolEndToEnd(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	// 1. Build a real R source tarball.
-	const pkgName = "pakmantest"
+	const pkgName = "packyardtest"
 	const pkgVersion = "0.1.0"
 	tarball := buildRPackageTarball(t, pkgName, pkgVersion)
 
@@ -152,12 +152,12 @@ func buildRPackageTarball(t *testing.T, name, version string) []byte {
 	}
 
 	desc := fmt.Sprintf(
-		"Package: %s\nVersion: %s\nTitle: A pakman smoke-test package\n"+
+		"Package: %s\nVersion: %s\nTitle: A packyard smoke-test package\n"+
 			"License: MIT + file LICENSE\nEncoding: UTF-8\n",
 		name, version)
 	addFile(name+"/DESCRIPTION", desc)
 	addFile(name+"/NAMESPACE", "exportPattern(\"^[^.]\")\n")
-	addFile(name+"/R/hello.R", "hello <- function() \"hi from pakman\"\n")
+	addFile(name+"/R/hello.R", "hello <- function() \"hi from packyard\"\n")
 
 	if err := tw.Close(); err != nil {
 		t.Fatalf("tar close: %v", err)

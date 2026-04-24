@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Multi-stage build for pakman-server.
+# Multi-stage build for packyard-server.
 # Final image is distroless/static — pure Go binary, no shell, no apk/apt.
 
 # ---- build stage ----
@@ -21,14 +21,14 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
-    -ldflags "-s -w -X github.com/schochastics/pakman/internal/version.Version=${VERSION}" \
-    -o /out/pakman-server \
-    ./cmd/pakman-server
+    -ldflags "-s -w -X github.com/schochastics/packyard/internal/version.Version=${VERSION}" \
+    -o /out/packyard-server \
+    ./cmd/packyard-server
 
 # ---- final stage ----
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY --from=build /out/pakman-server /usr/local/bin/pakman-server
+COPY --from=build /out/packyard-server /usr/local/bin/packyard-server
 
 # TLS roots for outbound HTTPS (distroless/static ships them but we make it explicit).
 # Data directory is expected to be a mount point at /data.
@@ -37,4 +37,4 @@ WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 8080
 
-ENTRYPOINT ["/usr/local/bin/pakman-server"]
+ENTRYPOINT ["/usr/local/bin/packyard-server"]

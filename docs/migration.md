@@ -1,7 +1,7 @@
-# Migrating to pakman
+# Migrating to packyard
 
-Moving an existing internal-R-packages setup onto pakman. Covers the
-two migration paths pakman ships with — drat repos and git repos —
+Moving an existing internal-R-packages setup onto packyard. Covers the
+two migration paths packyard ships with — drat repos and git repos —
 plus the one-line change consumers need in their `install.packages()`
 / `install_github()` calls.
 
@@ -9,10 +9,10 @@ plus the one-line change consumers need in their `install.packages()`
 
 [drat](https://github.com/eddelbuettel/drat) repos are already shaped
 like CRAN: a file tree with `src/contrib/PACKAGES` and per-package
-source tarballs. pakman can pull the full set in one command.
+source tarballs. packyard can pull the full set in one command.
 
 ```sh
-pakman-server admin import drat https://drat.example.org -channel dev
+packyard-server admin import drat https://drat.example.org -channel dev
 ```
 
 What it does:
@@ -37,20 +37,20 @@ Notes:
 
 ### After the import
 
-Point your R users at pakman:
+Point your R users at packyard:
 
 ```r
 # Old: drat
 options(repos = c(INTERNAL = "https://drat.example.org", getOption("repos")))
 
-# New: pakman, default channel
-options(repos = c(INTERNAL = "https://pakman.corp", getOption("repos")))
+# New: packyard, default channel
+options(repos = c(INTERNAL = "https://packyard.corp", getOption("repos")))
 
-# New: pakman, specific channel
-options(repos = c(DEV = "https://pakman.corp/dev", getOption("repos")))
+# New: packyard, specific channel
+options(repos = c(DEV = "https://packyard.corp/dev", getOption("repos")))
 ```
 
-`install.packages()` just works from there — pakman serves the CRAN
+`install.packages()` just works from there — packyard serves the CRAN
 protocol at `/<channel>/src/contrib/PACKAGES` and the default-channel
 alias at `/src/contrib/PACKAGES`.
 
@@ -61,7 +61,7 @@ git importer. It shallow-clones and runs `R CMD build`, so you need
 both `git` and `R` on the machine running the command.
 
 ```sh
-pakman-server admin import git https://git.example.org/foo.git -branch main -channel dev
+packyard-server admin import git https://git.example.org/foo.git -branch main -channel dev
 ```
 
 What it does:
@@ -85,7 +85,7 @@ devtools::install_github("corp/foo", ref = "main")
 New (once `foo` has been imported at least once):
 
 ```r
-install.packages("foo", repos = "https://pakman.corp/dev")
+install.packages("foo", repos = "https://packyard.corp/dev")
 ```
 
 You'll typically wrap the import + tag for release in the project's CI
@@ -100,7 +100,7 @@ dozen git repos:
 
 ```sh
 while read repo; do
-  pakman-server admin import git "$repo" -branch main -channel dev \
+  packyard-server admin import git "$repo" -branch main -channel dev \
     || echo "failed: $repo" >> failures.log
 done < repos.txt
 ```
@@ -115,5 +115,5 @@ done < repos.txt
   exist. Import restores the source tree; binaries for the CURRENT
   version get built by CI on the next push.
 - **Delete from the source.** Imports are additive. Clean up the drat
-  repo / archive the git branch manually once you've verified pakman
+  repo / archive the git branch manually once you've verified packyard
   has what you need.

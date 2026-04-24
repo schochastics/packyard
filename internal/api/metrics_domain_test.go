@@ -22,10 +22,10 @@ func TestPublishEmitsCounter(t *testing.T) {
 	body := rec.Body.String()
 
 	cases := []string{
-		`pakman_publish_total{channel="dev",result="created"}`,
-		`pakman_publish_total{channel="dev",result="overwrote"}`,
-		`pakman_publish_total{channel="prod",result="created"}`,
-		`pakman_publish_total{channel="prod",result="already_existed"}`,
+		`packyard_publish_total{channel="dev",result="created"}`,
+		`packyard_publish_total{channel="dev",result="overwrote"}`,
+		`packyard_publish_total{channel="prod",result="created"}`,
+		`packyard_publish_total{channel="prod",result="already_existed"}`,
 	}
 	for _, want := range cases {
 		if !strings.Contains(body, want) {
@@ -45,7 +45,7 @@ func TestYankEmitsCounter(t *testing.T) {
 	}
 
 	body := doGet(t, fx, "/metrics", "").Body.String()
-	if !strings.Contains(body, `pakman_yank_total{channel="dev"}`) {
+	if !strings.Contains(body, `packyard_yank_total{channel="dev"}`) {
 		t.Errorf("yank counter missing: %s", truncate(body, 600))
 	}
 }
@@ -61,7 +61,7 @@ func TestDeleteEmitsCounter(t *testing.T) {
 	}
 
 	body := doGet(t, fx, "/metrics", "").Body.String()
-	if !strings.Contains(body, `pakman_delete_total{channel="dev"}`) {
+	if !strings.Contains(body, `packyard_delete_total{channel="dev"}`) {
 		t.Errorf("delete counter missing: %s", truncate(body, 600))
 	}
 }
@@ -74,14 +74,14 @@ func TestCASBytesReflectsPublishedContent(t *testing.T) {
 	// 12 source bytes + 0 binary bytes = 12.
 
 	body := doGet(t, fx, "/metrics", "").Body.String()
-	if !strings.Contains(body, "pakman_cas_bytes 12") {
+	if !strings.Contains(body, "packyard_cas_bytes 12") {
 		t.Errorf("cas_bytes gauge not 12: %s", truncate(body, 600))
 	}
 
 	// Deleting reclaims logically.
 	_ = doDelete(t, fx, "dev", "alpha", "1.0.0", fx.token)
 	body = doGet(t, fx, "/metrics", "").Body.String()
-	if !strings.Contains(body, "pakman_cas_bytes 0") {
+	if !strings.Contains(body, "packyard_cas_bytes 0") {
 		t.Errorf("cas_bytes did not return to 0 after delete: %s", truncate(body, 600))
 	}
 }
@@ -99,10 +99,10 @@ func TestTokenAdminCountersFire(t *testing.T) {
 	}
 
 	body := doGet(t, fx, "/metrics", "").Body.String()
-	if !strings.Contains(body, "pakman_token_create_total 1") {
+	if !strings.Contains(body, "packyard_token_create_total 1") {
 		t.Errorf("token_create_total != 1: %s", truncate(body, 600))
 	}
-	if !strings.Contains(body, "pakman_token_revoke_total 0") {
+	if !strings.Contains(body, "packyard_token_revoke_total 0") {
 		t.Errorf("token_revoke_total != 0: %s", truncate(body, 600))
 	}
 }

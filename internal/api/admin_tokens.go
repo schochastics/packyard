@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/schochastics/pakman/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 // scopeRE matches an individual scope entry. Validates shape at the

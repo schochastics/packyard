@@ -10,7 +10,7 @@ import (
 )
 
 // defaultConfigFS holds the channels.yaml and matrix.yaml that ship
-// inside the pakman binary. First-run bootstrap copies these onto
+// inside the packyard binary. First-run bootstrap copies these onto
 // disk; subsequent runs read the on-disk files so operators can edit
 // them without rebuilding.
 //

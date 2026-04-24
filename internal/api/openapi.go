@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/schochastics/pakman/openapi"
+	"github.com/schochastics/packyard/openapi"
 	"gopkg.in/yaml.v3"
 )
 

@@ -3,7 +3,7 @@ package auth_test
 import (
 	"testing"
 
-	"github.com/schochastics/pakman/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 func TestParseScopes(t *testing.T) {

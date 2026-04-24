@@ -6,12 +6,12 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func openTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "pakman.sqlite"))
+	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "packyard.sqlite"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

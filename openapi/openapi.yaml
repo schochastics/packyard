@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 info:
-  title: pakman
+  title: packyard
   description: |
     Single-binary R package registry for internal R packages.
 
@@ -10,7 +10,7 @@ info:
     at the top of the URL tree) is what R clients such as `install.packages`,
     `renv`, and `pak` hit directly.
 
-    See https://github.com/schochastics/pakman for docs and the
+    See https://github.com/schochastics/packyard for docs and the
     implementation plan.
   version: 0.1.0
   license:
@@ -20,7 +20,7 @@ info:
 servers:
   - url: http://localhost:8080
     description: Local development
-  - url: https://pakman.example.com
+  - url: https://packyard.example.com
     description: Production deployment (example)
 
 # Every route under /api/v1 requires a bearer token except /health. The
@@ -859,7 +859,7 @@ paths:
   # ---- CRAN-protocol source reads -----------------------------------
   #
   # URL shape matches what R's contrib.url() builds from
-  #   options(repos = "http://pakman/<channel>")
+  #   options(repos = "http://packyard/<channel>")
   # so install.packages() "just works". Default-channel aliases (no
   # /{channel} prefix) route to the is_default=1 channel.
   #

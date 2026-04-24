@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/api"
-	"github.com/schochastics/pakman/internal/cas"
-	"github.com/schochastics/pakman/internal/config"
-	"github.com/schochastics/pakman/internal/db"
-	"github.com/schochastics/pakman/internal/importers"
+	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/importers"
 )
 
 // mockDrat stands up a tiny HTTP server that mimics a drat/CRAN-shaped
@@ -50,7 +50,7 @@ func newImportDeps(t *testing.T, channel, policy string) api.Deps {
 	t.Helper()
 	dir := t.TempDir()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(dir, "pakman.sqlite"))
+	database, err := db.Open(ctx, filepath.Join(dir, "packyard.sqlite"))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

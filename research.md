@@ -1,8 +1,8 @@
-# Pakman — Prior-Art Research for a New R Package Manager
+# Packyard — Prior-Art Research for a New R Package Manager
 
 ## Context
 
-`pakman` is intended to be a brand-new R package manager, built from scratch in an empty repository (`/Users/david/projects/pakman`). Before committing to a design, this document captures what already exists — inside R and across other language ecosystems — and identifies the strengths, weaknesses, and transferable ideas. The goal is to avoid re-inventing what works, avoid known footguns, and have a clear view of what R is missing relative to modern standards.
+`packyard` is intended to be a brand-new R package manager, built from scratch in an empty repository (`/Users/david/projects/packyard`). Before committing to a design, this document captures what already exists — inside R and across other language ecosystems — and identifies the strengths, weaknesses, and transferable ideas. The goal is to avoid re-inventing what works, avoid known footguns, and have a clear view of what R is missing relative to modern standards.
 
 This is a **research deliverable**, not an implementation plan. A separate design document should follow once the direction is chosen.
 
@@ -46,7 +46,7 @@ This is a **research deliverable**, not an implementation plan. A separate desig
 - **[remotes](https://remotes.r-lib.org/) / `devtools::install_*`** — Serial, no resolver, but ubiquitous for GitHub installs.
 - **[pkgr](https://metrumresearchgroup.github.io/pkgr/)** (Metrum) — Declarative YAML config, pharma/audit focus, fail-fast. Complements renv. One of the few R tools that starts from "declare first, resolve second."
 - **[rv](https://github.com/A2-ai/rv)** (A2-Ai, first release March 2025) — Rust-based, declarative config + lockfile, resolves the full tree up front, multi-source, project-local envs, explicitly inspired by `uv` and Cargo. Docs at [a2-ai.github.io/rv-docs](https://a2-ai.github.io/rv-docs/). Focused on package resolution; **does not** manage R installations and has no `rv run`. (Caveat: there is a separate Ruby "rv" project from 2025 — don't confuse.)
-- **[uvr](https://github.com/nbafrank/uvr)** (nbafrank, first commit March 2026, ~80★ at time of writing) — **The other direct prior-art project, and the most feature-complete so far.** Rust, 2-crate workspace (`uvr-core` + `uvr` CLI), MIT. Goes further than rv: adds built-in R-version management (`uvr r install/use/pin`), `uvr run` in isolated env, `uvr doctor`, `uvr export`/`import` for renv.lock interop, P3M-binary-first with source fallback, GitHub + Bioconductor sources, r-hub sysreqs API for Linux system deps. Manifest `uvr.toml`, lockfile `uvr.lock`, project library at `.uvr/library/`. Companion R package [uvr-r](https://github.com/nbafrank/uvr-r) wraps the CLI for RStudio/Positron users. *Strengths:* closest to a uv-for-R experience; benchmarks claim 2–50× faster installs than renv/pak/`install.packages` on warm caches; explicit renv.lock compatibility path. *Weaknesses/gaps:* single-maintainer, ~1 month old; Linux has no P3M binaries so falls back to source; Windows needs Rtools for source fallback; no mention of content-addressable store or hardlinks (project-local `.uvr/library/` only); no workspaces; PubGrub-style resolver explanations not yet demonstrated. **Both rv and uvr should be studied deeply before designing anything** — together they define the "declarative Rust-based R PM" design space that `pakman` enters. The fact that two independent projects converged on nearly the same design in 12 months is itself signal.
+- **[uvr](https://github.com/nbafrank/uvr)** (nbafrank, first commit March 2026, ~80★ at time of writing) — **The other direct prior-art project, and the most feature-complete so far.** Rust, 2-crate workspace (`uvr-core` + `uvr` CLI), MIT. Goes further than rv: adds built-in R-version management (`uvr r install/use/pin`), `uvr run` in isolated env, `uvr doctor`, `uvr export`/`import` for renv.lock interop, P3M-binary-first with source fallback, GitHub + Bioconductor sources, r-hub sysreqs API for Linux system deps. Manifest `uvr.toml`, lockfile `uvr.lock`, project library at `.uvr/library/`. Companion R package [uvr-r](https://github.com/nbafrank/uvr-r) wraps the CLI for RStudio/Positron users. *Strengths:* closest to a uv-for-R experience; benchmarks claim 2–50× faster installs than renv/pak/`install.packages` on warm caches; explicit renv.lock compatibility path. *Weaknesses/gaps:* single-maintainer, ~1 month old; Linux has no P3M binaries so falls back to source; Windows needs Rtools for source fallback; no mention of content-addressable store or hardlinks (project-local `.uvr/library/` only); no workspaces; PubGrub-style resolver explanations not yet demonstrated. **Both rv and uvr should be studied deeply before designing anything** — together they define the "declarative Rust-based R PM" design space that `packyard` enters. The fact that two independent projects converged on nearly the same design in 12 months is itself signal.
 
 ### 1.4 R-version managers (adjacent)
 
@@ -191,7 +191,7 @@ Flat `PACKAGES` is legacy but universal — must stay compatible. Layer a JSON/M
 
 R has essentially nothing here. A simple model:
 ```
-pakman.toml   # workspace root
+packyard.toml   # workspace root
   packages/
     pkgA/DESCRIPTION
     pkgB/DESCRIPTION  # Depends: pkgA
@@ -223,11 +223,11 @@ Counter-argument: the R contributor pool is ~0 % Rust. A pure-R tool (pak/renv m
 ### 3.12 Developer UX
 
 Table-stakes for a 2026 PM:
-- `pakman init` scaffolding.
-- `pakman add <pkg>` / `pakman remove`.
-- `pakman sync` / `pakman lock` / `pakman lock --upgrade [pkg]`.
-- `pakman tree`, `pakman outdated`, `pakman why <pkg>`.
-- `pakman run <task>`.
+- `packyard init` scaffolding.
+- `packyard add <pkg>` / `packyard remove`.
+- `packyard sync` / `packyard lock` / `packyard lock --upgrade [pkg]`.
+- `packyard tree`, `packyard outdated`, `packyard why <pkg>`.
+- `packyard run <task>`.
 - Shell completions (bash/zsh/fish/pwsh).
 - Dry-run on every mutating op.
 - **Explainable resolver errors** (the biggest UX differentiator in 2026).
@@ -238,15 +238,15 @@ CRAN is behind every other major ecosystem here. Minimum upgrades:
 - SHA256 (not MD5) integrity hashes in the lockfile.
 - Sigstore/provenance support for packages published via modern CI (GitHub, GitLab).
 - Lockfile signing.
-- Audit trail: `pakman audit` listing CVEs / retracted packages.
+- Audit trail: `packyard audit` listing CVEs / retracted packages.
 
 ### 3.14 Offline / air-gapped
 
-`pakman vendor` (copy all resolved packages into `./vendor/`), plus a mirror-building mode. Critical for pharma, HPC, regulated industries — a natural R user base that renv serves poorly.
+`packyard vendor` (copy all resolved packages into `./vendor/`), plus a mirror-building mode. Critical for pharma, HPC, regulated industries — a natural R user base that renv serves poorly.
 
 ### 3.15 Task running
 
-Not essential for v1. If added, keep trivial: tasks declared in the manifest, `pakman run <name>` activates env + executes. Don't reinvent `targets`/`make`.
+Not essential for v1. If added, keep trivial: tasks declared in the manifest, `packyard run <name>` activates env + executes. Don't reinvent `targets`/`make`.
 
 ---
 
@@ -267,7 +267,7 @@ Not essential for v1. If added, keep trivial: tasks declared in the manifest, `p
 
 ---
 
-## 5. Ideas Most Worth Stealing for pakman
+## 5. Ideas Most Worth Stealing for packyard
 
 High-leverage, differentiated:
 1. **uv's whole model** (manifest + lockfile + content-addressable cache + PubGrub + standalone binary + R-version management).
@@ -295,7 +295,7 @@ These are **not** to be answered here — just flagged:
 6. **Binary story.** Ride on PPM, build our own cache, or vendor-system-lib model?
 7. **Resolver choice.** PubGrub, ILP (pak-style), MVS, or SAT?
 8. **Target audience priority.** Solo data scientist / Shiny app dev / pharma / HPC / package author — these have conflicting defaults.
-9. **CLI-first or REPL-first.** `pakman` as a shell binary, or `library(pakman)` as an R package, or both?
+9. **CLI-first or REPL-first.** `packyard` as a shell binary, or `library(packyard)` as an R package, or both?
 10. **Config format.** TOML (industry norm), YAML (pkgr precedent), or R DSL (Rcpp/devtools precedent)?
 
 ---

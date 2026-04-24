@@ -1,6 +1,6 @@
 # 5-minute quickstart
 
-Zero to "R installs your first internal package from pakman" in roughly
+Zero to "R installs your first internal package from packyard" in roughly
 five copy-pasteable commands. Pick the install path that fits:
 
 - **[Docker](#docker)** — one `docker run` and you're done; recommended
@@ -13,20 +13,20 @@ machine.
 
 ## Docker
 
-> The official `ghcr.io/schochastics/pakman` image ships with the first
+> The official `ghcr.io/schochastics/packyard` image ships with the first
 > tagged release. Until then, use [From source](#from-source).
 
-### 1. Start pakman
+### 1. Start packyard
 
 ```sh
-docker run --rm -d --name pakman \
+docker run --rm -d --name packyard \
   -p 8080:8080 \
-  -v pakman-data:/data \
-  ghcr.io/schochastics/pakman:latest \
-  pakman-server -data /data -allow-anonymous-reads
+  -v packyard-data:/data \
+  ghcr.io/schochastics/packyard:latest \
+  packyard-server -data /data -allow-anonymous-reads
 ```
 
-Pakman runs in the foreground of the container with WAL-mode SQLite at
+Packyard runs in the foreground of the container with WAL-mode SQLite at
 `/data/db.sqlite` and a content-addressed blob store under `/data/cas/`.
 Default channels `dev` / `test` / `prod` are created on first start; see
 [config.md](config.md) to change them.
@@ -41,7 +41,7 @@ a token via a custom download method — see [config.md](config.md) and
 ### 2. Mint an admin token
 
 ```sh
-ADMIN=$(docker exec pakman pakman-server \
+ADMIN=$(docker exec packyard packyard-server \
   -mint-token -data /data -scopes admin -label bootstrap 2>/dev/null)
 echo "$ADMIN"
 ```
@@ -51,20 +51,20 @@ echo "$ADMIN"
 ## From source
 
 Needs Go 1.22+ installed. Everything runs under a throwaway `./tmpdata/`
-dir so it won't collide with an existing pakman install.
+dir so it won't collide with an existing packyard install.
 
-### 1. Build and start pakman
+### 1. Build and start packyard
 
 ```sh
-git clone https://github.com/schochastics/pakman.git
-cd pakman
+git clone https://github.com/schochastics/packyard.git
+cd packyard
 make build
 
 # Bootstrap the data dir (creates db.sqlite, cas/, default configs).
-./pakman-server -init -data ./tmpdata
+./packyard-server -init -data ./tmpdata
 
 # Start the server in the background.
-./pakman-server -data ./tmpdata -allow-anonymous-reads &
+./packyard-server -data ./tmpdata -allow-anonymous-reads &
 SERVER_PID=$!
 sleep 0.5
 ```
@@ -81,7 +81,7 @@ Kill the server with `kill $SERVER_PID` when you're done, and
 ### 2. Mint an admin token
 
 ```sh
-ADMIN=$(./pakman-server -mint-token -data ./tmpdata \
+ADMIN=$(./packyard-server -mint-token -data ./tmpdata \
   -scopes admin -label bootstrap 2>/dev/null)
 echo "$ADMIN"
 ```
@@ -113,9 +113,9 @@ mkdir -p /tmp/mypkg && cd /tmp/mypkg
 cat > DESCRIPTION <<EOF
 Package: mypkg
 Type: Package
-Title: Example pakman package
+Title: Example packyard package
 Version: 1.0.0
-Description: Smoke-test package for the pakman quickstart.
+Description: Smoke-test package for the packyard quickstart.
 License: MIT
 EOF
 R CMD build .
@@ -135,7 +135,7 @@ Response is JSON with the stored `source_sha256`, `source_size`, and a
 ## 5. Install from R
 
 ```r
-options(repos = c(PAKMAN = "http://localhost:8080/", getOption("repos")))
+options(repos = c(PACKYARD = "http://localhost:8080/", getOption("repos")))
 install.packages("mypkg")
 ```
 
@@ -158,7 +158,7 @@ Full dashboard pages: `/ui/channels/{name}`, `/ui/events`, `/ui/cells`,
 
 Five endpoints, in this order:
 
-1. `pakman-server -mint-token` — bootstrap the first admin token.
+1. `packyard-server -mint-token` — bootstrap the first admin token.
 2. `POST /api/v1/admin/tokens` — mint narrow-scope tokens for CI/humans.
 3. `POST /api/v1/packages/{channel}/{name}/{version}` — publish.
 4. `GET /{channel}/src/contrib/PACKAGES` (via `install.packages()`) —
@@ -177,16 +177,16 @@ Everything else stays the same.
   exists with different bytes. Bump `Version:` in DESCRIPTION, or
   publish to a mutable channel (default: `dev`, `test`).
 - **R says `cannot open URL '…/src/contrib/PACKAGES'`** — R sends no
-  bearer token, and pakman's default config rejects anonymous reads
+  bearer token, and packyard's default config rejects anonymous reads
   with 401. Restart the server with `-allow-anonymous-reads` (or set
   `allow_anonymous_reads: true` in `server.yaml`). Only the default
   channel becomes public; `dev` / `test` stay scoped.
 - **Can't reach `http://localhost:8080/`** — on Linux with rootless
   Docker, the `-p 8080:8080` mapping may need `--publish=host`. Check
   `docker ps` shows the port mapped, and `curl http://localhost:8080/health`.
-- **`address already in use`** — a previous pakman server is still
-  bound to 8080. `pkill -f pakman-server` (source install) or
-  `docker rm -f pakman` (Docker) before retrying.
+- **`address already in use`** — a previous packyard server is still
+  bound to 8080. `pkill -f packyard-server` (source install) or
+  `docker rm -f packyard` (Docker) before retrying.
 - **No R on this machine** — `R CMD build` in step 4 needs an R
   install. If you're only smoke-testing the publish endpoint, swap the
   scaffold step for any existing `.tar.gz`; the server takes arbitrary
@@ -199,4 +199,4 @@ Everything else stays the same.
 - [api.md](api.md) — full HTTP reference with curl examples.
 - [config.md](config.md) — channels, matrix, server config YAMLs.
 - [admin.md](admin.md) — CLI admin commands (import, gc, reindex).
-- [migration.md](migration.md) — moving from drat or git to pakman.
+- [migration.md](migration.md) — moving from drat or git to packyard.

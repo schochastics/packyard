@@ -13,7 +13,7 @@ import (
 // Ways the CRAN-protocol read surface differs from strict CRAN:
 //
 //   - All versions of a package appear in PACKAGES, not just the latest.
-//     CRAN keeps older versions in /Archive/; pakman is simpler. R's
+//     CRAN keeps older versions in /Archive/; packyard is simpler. R's
 //     available.packages() will dedupe (keeping the lex-max version),
 //     which works for the common case of monotonically increasing
 //     versions and is documented as a known quirk otherwise.
@@ -212,8 +212,8 @@ func (i *Index) buildBinary(ctx context.Context, channel, cell, rMinor string) (
 // Richer fields (Depends, Imports, MD5sum, etc.) require parsing
 // DESCRIPTION files from tarballs and land in v1.x. Base R tolerates
 // missing fields — install.packages() still works, and dependency
-// resolution for pakman→CRAN deps works when CRAN is in the repos
-// list. pakman→pakman dep resolution requires the richer PACKAGES
+// resolution for packyard→CRAN deps works when CRAN is in the repos
+// list. packyard→packyard dep resolution requires the richer PACKAGES
 // file; document this trade-off in docs/quickstart.md.
 func formatSourcePackages(rows []indexRow) []byte {
 	// Stable output: already ordered by SQL, but defensively sort so

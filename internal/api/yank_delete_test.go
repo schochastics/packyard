@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 // seedPublished inserts a single package on (channel, name, version)

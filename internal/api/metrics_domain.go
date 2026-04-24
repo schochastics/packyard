@@ -2,7 +2,7 @@ package api
 
 import "context"
 
-// refreshCASBytes recomputes the pakman_cas_bytes gauge from the DB.
+// refreshCASBytes recomputes the packyard_cas_bytes gauge from the DB.
 // Called after any mutation that adds or removes package/binary rows.
 //
 // The query is a single scan of two small tables plus aggregate sums;

@@ -1,4 +1,4 @@
-# Pakman v1 — Implementation Plan
+# Packyard v1 — Implementation Plan
 
 ## Context
 
@@ -37,9 +37,9 @@ Keep dependencies minimal to match the lightweight ethos:
 ## Project layout
 
 ```
-pakman/
+packyard/
   cmd/
-    pakman-server/
+    packyard-server/
       main.go                 # entry point, flag parsing, server start
   internal/
     api/                      # HTTP handlers, middleware, routing
@@ -133,12 +133,12 @@ Explicitly *not* targeting:
 
 ### A1. Bootstrap — ~3 days
 
-**Deliverables:** Buildable Go module with CI running tests, a stub `pakman-server` binary that prints version and exits, and a container image.
+**Deliverables:** Buildable Go module with CI running tests, a stub `packyard-server` binary that prints version and exits, and a container image.
 
 **Tasks:**
 
-1. `go mod init github.com/<owner>/pakman`; choose owner.
-2. Create `cmd/pakman-server/main.go` with `-version` and `-config` flags.
+1. `go mod init github.com/<owner>/packyard`; choose owner.
+2. Create `cmd/packyard-server/main.go` with `-version` and `-config` flags.
 3. Set up `Makefile` with `test`, `build`, `fmt`, `vet`, `lint`.
 4. Add `golangci-lint` config (`.golangci.yaml`).
 5. `.github/workflows/ci.yml` (or `.gitea/workflows/ci.yml`): run `go test ./...`, `golangci-lint run`, build binary.
@@ -147,7 +147,7 @@ Explicitly *not* targeting:
 8. `LICENSE` (MIT or Apache-2.0 — pick one).
 9. Initial `README.md` stub with positioning paragraph from [design.md](design.md) §0.
 
-**Acceptance:** `make build` produces a binary. `make test` passes. CI is green. `docker build .` succeeds. `pakman-server -version` prints a version string.
+**Acceptance:** `make build` produces a binary. `make test` passes. CI is green. `docker build .` succeeds. `packyard-server -version` prints a version string.
 
 ---
 
@@ -157,7 +157,7 @@ Explicitly *not* targeting:
 
 **Tasks:**
 
-1. Decide data directory layout: `${PAKMAN_DATA}/db.sqlite`, `${PAKMAN_DATA}/cas/<first-2-chars>/<remaining>`.
+1. Decide data directory layout: `${PACKYARD_DATA}/db.sqlite`, `${PACKYARD_DATA}/cas/<first-2-chars>/<remaining>`.
 2. Write `internal/db/db.go` — open SQLite with WAL mode, foreign keys on, reasonable timeouts.
 3. Write `internal/db/migrate.go` — apply `migrations/*.sql` in order inside a tx; record applied version in `schema_migrations` table.
 4. Draft `migrations/001_init.sql` with tables:
@@ -188,7 +188,7 @@ Explicitly *not* targeting:
 6. Ship `default-config/channels.yaml` and `default-config/matrix.yaml` baked into the binary via `embed`. First-run bootstraps these into the data dir if missing.
 7. Unit tests for validation errors (duplicate names, no default channel, invalid overwrite policy, etc.).
 
-**Acceptance:** `pakman-server` with a fresh data dir writes default config files and starts. With a malformed `channels.yaml`, it exits 1 with a clear error message.
+**Acceptance:** `packyard-server` with a fresh data dir writes default config files and starts. With a malformed `channels.yaml`, it exits 1 with a clear error message.
 
 ---
 
@@ -218,7 +218,7 @@ Explicitly *not* targeting:
 
 ### A5. CRAN-protocol read surface — ~5 days
 
-**Deliverables:** R clients (base, renv, pak) can install published packages from pakman.
+**Deliverables:** R clients (base, renv, pak) can install published packages from packyard.
 
 **Tasks:**
 
@@ -248,10 +248,10 @@ Explicitly *not* targeting:
    - `POST /api/v1/admin/tokens` — create; returns the token ONCE (never again); body has label + scopes.
    - `GET /api/v1/admin/tokens` — list; response omits the token itself, just `{id, label, scopes, created_at, last_used_at, revoked_at}`.
    - `DELETE /api/v1/admin/tokens/{id}` — revoke.
-6. Bootstrap: on empty DB, `pakman-server admin create-admin-token` CLI subcommand writes an admin token to stdout. Operator rotates via API afterwards.
+6. Bootstrap: on empty DB, `packyard-server admin create-admin-token` CLI subcommand writes an admin token to stdout. Operator rotates via API afterwards.
 7. Integration tests: unauth → 401, wrong scope → 403, admin-only endpoints require admin scope, revoked token fails.
 
-**Acceptance:** `pakman-server admin create-admin-token` issues a token. Publishing without a token fails with 401. Publishing with a `publish:dev` token succeeds on dev, fails on prod. Revoked tokens are rejected on next request.
+**Acceptance:** `packyard-server admin create-admin-token` issues a token. Publishing without a token fails with 401. Publishing with a `publish:dev` token succeeds on dev, fails on prod. Revoked tokens are rejected on next request.
 
 ---
 
@@ -315,7 +315,7 @@ Explicitly *not* targeting:
 **Tasks:**
 
 1. `internal/api/health.go` — runs DB ping + CAS directory writability check. `{status: ok}` on success, `503` with degraded subsystems listed otherwise.
-2. `internal/api/metrics.go` — Prometheus registry with counters: `pakman_publish_total{channel}`, `pakman_yank_total{channel}`, `pakman_delete_total{channel}`, `pakman_http_requests_total{path,method,status}`, `pakman_http_request_duration_seconds` histogram, `pakman_cas_bytes_total`. Plus default Go runtime metrics.
+2. `internal/api/metrics.go` — Prometheus registry with counters: `packyard_publish_total{channel}`, `packyard_yank_total{channel}`, `packyard_delete_total{channel}`, `packyard_http_requests_total{path,method,status}`, `packyard_http_request_duration_seconds` histogram, `packyard_cas_bytes_total`. Plus default Go runtime metrics.
 3. `slog` JSON handler for stdout. Middleware logs each request with `request_id`, method, path, status, duration, user (from token label).
 4. Acceptance test: scrape `/metrics` with promtool.
 
@@ -337,7 +337,7 @@ Explicitly *not* targeting:
 6. `/ui/cells`: list of configured cells with coverage % per channel.
 7. `/ui/storage`: CAS bytes total, top-N largest packages.
 8. Minimal CSS — plain, no framework. Embed as static assets.
-9. Auth: UI requires `read:*` or any valid token; simple session cookie issued after token login at `/ui/login`. OR: HTTP Basic auth over the bearer token. Simplest: just require a bearer token via cookie named `pakman_token`, set by `/ui/login` form. Session storage: signed cookie, no server-side sessions.
+9. Auth: UI requires `read:*` or any valid token; simple session cookie issued after token login at `/ui/login`. OR: HTTP Basic auth over the bearer token. Simplest: just require a bearer token via cookie named `packyard_token`, set by `/ui/login` form. Session storage: signed cookie, no server-side sessions.
 10. Integration test: unauthenticated request to `/ui/` redirects to `/ui/login`; valid token gets the dashboard.
 
 **Acceptance:** Log into `/ui/` with the admin token. See live channels, recent publishes, storage numbers. No JavaScript framework; no Node toolchain.
@@ -351,7 +351,7 @@ Explicitly *not* targeting:
 **Tasks:**
 
 1. Copy the YAML from [design.md](design.md) §8.4 into `examples/ci/publish.yml`.
-2. Verify it works on real GitHub Actions against a deployed dev pakman (use a public package like `jsonlite` for the test, or a tiny scaffolded pkg).
+2. Verify it works on real GitHub Actions against a deployed dev packyard (use a public package like `jsonlite` for the test, or a tiny scaffolded pkg).
 3. Test on Gitea Actions too; note any divergences in `examples/ci/README.md`.
 4. Write `examples/ci/README.md` explaining the template, what to customise, where secrets go.
 
@@ -361,17 +361,17 @@ Explicitly *not* targeting:
 
 ### B6. Migration tools — ~5 days
 
-**Deliverables:** `pakman admin import --from drat` and `--from git`.
+**Deliverables:** `packyard admin import --from drat` and `--from git`.
 
 **Tasks:**
 
 1. `internal/importers/drat.go`: given a drat repo URL, walk `src/contrib/PACKAGES`, download each tarball, call the local publish path with source-only (no binaries).
 2. `internal/importers/git.go`: given a git URL and branch, shell out to `git clone`, run `R CMD build`, publish source-only (binaries via CI is the long-term path).
-3. CLI subcommands `pakman-server admin import drat <url> --channel <name>` and `admin import git <url> --branch <b> --channel <name>`.
+3. CLI subcommands `packyard-server admin import drat <url> --channel <name>` and `admin import git <url> --branch <b> --channel <name>`.
 4. Local publish path: avoid HTTP round-trip; call the same publish logic in-process with an internal admin identity.
 5. Progress output with per-package status.
 6. Integration tests: mock drat repo served via local HTTP; mock git repo in a temp dir.
-7. Doc: `docs/migration.md` — from drat to pakman, from install_github to pakman.
+7. Doc: `docs/migration.md` — from drat to packyard, from install_github to packyard.
 
 **Acceptance:** Point `admin import drat` at a real drat repo (there are public ones for demo) → all packages appear in the target channel. Point `admin import git` at a local R-package repo → package appears in the channel.
 
@@ -383,11 +383,11 @@ Explicitly *not* targeting:
 
 **Tasks:**
 
-1. `pakman-server admin channels list` — lists channels with stats (count, overwrite_policy, default flag).
-2. `pakman-server admin cells list` — lists cells with coverage stats.
-3. `pakman-server admin cells show <name>` — detail view including packages missing binaries for this cell.
-4. `pakman-server admin gc` — walks DB, computes live sha256 set, calls `cas.GC(liveSet)`. Reports freed bytes.
-5. `pakman-server admin reindex` — regenerates PACKAGES caches from DB (recovery op).
+1. `packyard-server admin channels list` — lists channels with stats (count, overwrite_policy, default flag).
+2. `packyard-server admin cells list` — lists cells with coverage stats.
+3. `packyard-server admin cells show <name>` — detail view including packages missing binaries for this cell.
+4. `packyard-server admin gc` — walks DB, computes live sha256 set, calls `cas.GC(liveSet)`. Reports freed bytes.
+5. `packyard-server admin reindex` — regenerates PACKAGES caches from DB (recovery op).
 6. These share code paths with the API handlers; mostly thin CLI shims.
 7. Integration tests per command against a temp DB.
 
@@ -408,7 +408,7 @@ Explicitly *not* targeting:
 
 ## Phase C — Launch
 
-**Goal:** v1.0.0 is tagged, installable, and someone who has never seen pakman succeeds with the quickstart on first try.
+**Goal:** v1.0.0 is tagged, installable, and someone who has never seen packyard succeeds with the quickstart on first try.
 
 **Estimated effort:** ~1–2 weeks solo.
 
@@ -420,13 +420,13 @@ Explicitly *not* targeting:
 
 **Tasks:**
 
-1. Draft the 5-command path: `docker run pakman-server` → get admin token → create publish token → build sample R package → curl publish → see it in dashboard.
+1. Draft the 5-command path: `docker run packyard-server` → get admin token → create publish token → build sample R package → curl publish → see it in dashboard.
 2. Test the flow on a clean machine (a VM or fresh container) with no prior state.
 3. Explicit success criterion to verify: all steps copy-pasteable from the doc; total wall-clock time under 5 minutes including Docker pull.
 4. Include screenshots of dashboard after publish.
 5. Link from README.
 
-**Acceptance:** An internal reviewer who has never touched pakman follows the quickstart and succeeds. Measured end-to-end time under 5 minutes.
+**Acceptance:** An internal reviewer who has never touched packyard follows the quickstart and succeeds. Measured end-to-end time under 5 minutes.
 
 ---
 
@@ -482,14 +482,14 @@ Explicitly *not* targeting:
 
 ### C5. Release engineering — ~2 days
 
-**Deliverables:** `v1.0.0` tagged and released; Docker image on `ghcr.io/<owner>/pakman:v1.0.0` and `:latest`.
+**Deliverables:** `v1.0.0` tagged and released; Docker image on `ghcr.io/<owner>/packyard:v1.0.0` and `:latest`.
 
 **Tasks:**
 
 1. Tighten `.goreleaser.yaml`: Linux amd64 + arm64 binaries; Darwin amd64 + arm64 (best-effort, not a primary target); checksums; SBOM; GitHub release notes template.
 2. CI step to run GoReleaser on tag push.
 3. Docker image push to ghcr.io.
-4. Version stamping: `-ldflags "-X github.com/<owner>/pakman/internal/version.Version=$VERSION"`.
+4. Version stamping: `-ldflags "-X github.com/<owner>/packyard/internal/version.Version=$VERSION"`.
 5. Smoke-test the released artifacts: download a binary from the release page, run it, confirm `-version` matches.
 6. Announcement draft — where (Hacker News? r-bloggers? Posit Community?); hold off publishing until the quickstart has been verified by one external tester.
 
@@ -500,7 +500,7 @@ Explicitly *not* targeting:
 **Phase C Definition of Done:**
 
 - `v1.0.0` tagged; release artifacts present and verified.
-- Quickstart tested end-to-end by someone who didn't build pakman.
+- Quickstart tested end-to-end by someone who didn't build packyard.
 - README, api.md, config.md, admin.md, backup-restore.md all published.
 - Docker image runnable as-is.
 
@@ -515,7 +515,7 @@ Explicitly *not* targeting:
 3. **SQLite WAL + concurrency**: write-heavy periods could contend. Mitigation: keep writes in short tx, use `BEGIN IMMEDIATE` for writes. At v1 scale this is unlikely to bite.
 4. **Distroless image missing things**: sometimes packages want `ca-certificates` or similar. Mitigation: build test — curl the release image against real TLS endpoints during CI.
 5. **Solo maintenance bandwidth post-launch**: the v1.x air-gap feature is the next big thing. Don't over-commit to post-launch features until v1 adoption is real.
-6. **Naming**: `pakman` is almost certainly not unique. A quick name search before tagging v1 prevents a rename later.
+6. **Naming**: `packyard` is almost certainly not unique. A quick name search before tagging v1 prevents a rename later.
 
 ### What's intentionally not in v1 (forward references)
 
@@ -541,8 +541,8 @@ Restating from [design.md](design.md) §12 so the implementation plan matches:
 All of:
 - Phase A, B, C DoDs above.
 - README reads well to an outsider.
-- Quickstart verified by someone who didn't build pakman.
-- The author can replace their current "share internal R packages" workflow with pakman on their own machine.
+- Quickstart verified by someone who didn't build packyard.
+- The author can replace their current "share internal R packages" workflow with packyard on their own machine.
 
 ---
 
@@ -551,11 +551,11 @@ All of:
 After implementation, verify end-to-end by:
 
 1. Running `make build && make test` — all tests pass.
-2. `docker run -v $(pwd)/data:/data ghcr.io/<owner>/pakman:v1.0.0` — server starts.
+2. `docker run -v $(pwd)/data:/data ghcr.io/<owner>/packyard:v1.0.0` — server starts.
 3. Following `docs/quickstart.md` from zero — first publish succeeds in under 5 minutes.
 4. Running the reference CI workflow from `examples/ci/publish.yml` against a real R package on both GitHub Actions and Gitea Actions.
 5. From an RStudio session: `install.packages("myInternal", repos = "http://localhost:8080/")` succeeds and the package loads.
 6. Opening `http://localhost:8080/ui/` and seeing the published package + the publish event.
-7. Running `pakman-server admin gc` after a couple of dev-channel overwrites and seeing disk reclaimed.
+7. Running `packyard-server admin gc` after a couple of dev-channel overwrites and seeing disk reclaimed.
 
 If all seven steps pass, v1 is real.

@@ -1,10 +1,10 @@
-// Package metrics owns the pakman Prometheus registry and the metric
+// Package metrics owns the packyard Prometheus registry and the metric
 // handles that everything else (middleware, domain handlers, admin
 // operations) increments.
 //
 // Shape conventions:
 //
-//   - All metric names prefixed "pakman_" except the stdlib runtime
+//   - All metric names prefixed "packyard_" except the stdlib runtime
 //     metrics the process collector contributes on its own.
 //   - HTTP metrics (cross-cutting) labeled only by method + status to
 //     keep cardinality bounded. Per-route metrics are not derived from
@@ -20,7 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 )
 
-// Metrics bundles every metric handle pakman emits. Construct one
+// Metrics bundles every metric handle packyard emits. Construct one
 // instance in main and pass to the API/mutation layers; do not
 // register individual handles anywhere else.
 type Metrics struct {
@@ -41,7 +41,7 @@ type Metrics struct {
 	TokenRevokeTotal prometheus.Counter
 }
 
-// New builds and registers every pakman metric on a fresh registry.
+// New builds and registers every packyard metric on a fresh registry.
 // Using our own registry (not the default one) keeps the surface
 // hermetic — a stray prometheus.DefaultRegisterer.MustRegister in
 // another dep can't pollute the /metrics output.
@@ -56,7 +56,7 @@ func New() *Metrics {
 		Registry: reg,
 		HTTPRequestsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: "pakman",
+				Namespace: "packyard",
 				Name:      "http_requests_total",
 				Help:      "Total HTTP requests handled, labeled by method and status code.",
 			},
@@ -64,10 +64,10 @@ func New() *Metrics {
 		),
 		HTTPRequestDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Namespace: "pakman",
+				Namespace: "packyard",
 				Name:      "http_request_duration_seconds",
 				Help:      "HTTP request duration in seconds, labeled by method and status code.",
-				// Buckets chosen for pakman's mix: fast admin/read requests
+				// Buckets chosen for packyard's mix: fast admin/read requests
 				// in the low-ms range, publish requests that can run for
 				// seconds over a slow link.
 				Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
@@ -76,7 +76,7 @@ func New() *Metrics {
 		),
 		PublishTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: "pakman",
+				Namespace: "packyard",
 				Name:      "publish_total",
 				Help:      "Publish attempts by channel and outcome (created, overwrote, already_existed, rejected).",
 			},
@@ -84,7 +84,7 @@ func New() *Metrics {
 		),
 		YankTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: "pakman",
+				Namespace: "packyard",
 				Name:      "yank_total",
 				Help:      "Successful yanks by channel.",
 			},
@@ -92,7 +92,7 @@ func New() *Metrics {
 		),
 		DeleteTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: "pakman",
+				Namespace: "packyard",
 				Name:      "delete_total",
 				Help:      "Successful hard-deletes by channel.",
 			},
@@ -100,7 +100,7 @@ func New() *Metrics {
 		),
 		CASBytes: prometheus.NewGauge(
 			prometheus.GaugeOpts{
-				Namespace: "pakman",
+				Namespace: "packyard",
 				Name:      "cas_bytes",
 				Help: "Logical bytes tracked by the DB: SUM(packages.source_size) + " +
 					"SUM(binaries.size). Upper bound on on-disk CAS footprint; " +
@@ -110,14 +110,14 @@ func New() *Metrics {
 		),
 		TokenCreateTotal: prometheus.NewCounter(
 			prometheus.CounterOpts{
-				Namespace: "pakman",
+				Namespace: "packyard",
 				Name:      "token_create_total",
 				Help:      "Tokens minted via the admin endpoint.",
 			},
 		),
 		TokenRevokeTotal: prometheus.NewCounter(
 			prometheus.CounterOpts{
-				Namespace: "pakman",
+				Namespace: "packyard",
 				Name:      "token_revoke_total",
 				Help:      "Tokens revoked via the admin endpoint.",
 			},

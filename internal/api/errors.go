@@ -1,4 +1,4 @@
-// Package api contains pakman's HTTP handlers, middleware, and router.
+// Package api contains packyard's HTTP handlers, middleware, and router.
 //
 // Every error response flows through writeError so clients can parse a
 // consistent JSON envelope. error_code is the documented machine-readable

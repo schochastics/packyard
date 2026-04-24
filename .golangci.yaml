@@ -1,4 +1,4 @@
-# golangci-lint configuration for pakman.
+# golangci-lint configuration for packyard.
 # See https://golangci-lint.run/usage/configuration/ for all options.
 run:
   timeout: 3m

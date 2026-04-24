@@ -6,16 +6,16 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/api"
-	"github.com/schochastics/pakman/internal/cas"
-	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func newGCTestDeps(t *testing.T) api.Deps {
 	t.Helper()
 	dir := t.TempDir()
 	ctx := context.Background()
-	database, err := db.Open(ctx, filepath.Join(dir, "pakman.sqlite"))
+	database, err := db.Open(ctx, filepath.Join(dir, "packyard.sqlite"))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

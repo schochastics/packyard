@@ -7,13 +7,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/config"
-	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func setupDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "pakman.sqlite"))
+	database, err := db.Open(context.Background(), filepath.Join(t.TempDir(), "packyard.sqlite"))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

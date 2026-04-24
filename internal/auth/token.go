@@ -12,14 +12,14 @@ import (
 	"time"
 )
 
-// tokenBytes is the length of the random portion of a pakman token.
+// tokenBytes is the length of the random portion of a packyard token.
 // 32 bytes (256 bits) is the common choice for opaque bearer tokens —
 // big enough to resist online guessing and offline rainbow tables, not
 // so big that copying the string into a CI secret is annoying.
 const tokenBytes = 32
 
 // tokenPrefix makes tokens identifiable at a glance in logs, secret
-// scanners, and CI config files ("ah, pkm_... that's a pakman token").
+// scanners, and CI config files ("ah, pkm_... that's a packyard token").
 const tokenPrefix = "pkm_"
 
 // ErrTokenNotFound is returned by Lookup when no unrevoked token with
@@ -42,7 +42,7 @@ func HashToken(plaintext string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// GenerateToken returns a new random plaintext token with the pakman
+// GenerateToken returns a new random plaintext token with the packyard
 // prefix. Uses crypto/rand; callers should surface the error if the
 // system random source is broken.
 func GenerateToken() (string, error) {

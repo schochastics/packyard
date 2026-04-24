@@ -1,4 +1,4 @@
-// Package importers provides tools for backfilling a pakman channel
+// Package importers provides tools for backfilling a packyard channel
 // from existing R package sources. v1 supports drat (HTTP) and git;
 // both importers publish source tarballs only — binaries are a CI
 // concern, not an import one.
@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/schochastics/pakman/internal/api"
+	"github.com/schochastics/packyard/internal/api"
 )
 
 // DratImporter walks a drat (or CRAN-shaped) repo over HTTP, fetching
@@ -26,7 +26,7 @@ import (
 type DratImporter struct {
 	Deps    api.Deps
 	Client  *http.Client // nil -> stdlib default with a 5m timeout
-	Channel string       // pakman channel to land imports in
+	Channel string       // packyard channel to land imports in
 	Actor   string       // event.actor tag; defaults to "import-drat"
 }
 
@@ -150,7 +150,7 @@ func (d *DratImporter) fetchPackagesIndex(ctx context.Context, pkgsURL string) (
 	return parsePackagesDCF(resp.Body)
 }
 
-// packagesEntry is the minimum pakman cares about per PACKAGES stanza.
+// packagesEntry is the minimum packyard cares about per PACKAGES stanza.
 type packagesEntry struct {
 	Package string
 	Version string

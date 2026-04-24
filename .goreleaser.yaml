@@ -1,4 +1,4 @@
-# GoReleaser config for pakman.
+# GoReleaser config for packyard.
 # https://goreleaser.com
 #
 # Full release is triggered by pushing a v* tag and a matching workflow in
@@ -7,16 +7,16 @@
 
 version: 2
 
-project_name: pakman
+project_name: packyard
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: pakman-server
-    main: ./cmd/pakman-server
-    binary: pakman-server
+  - id: packyard-server
+    main: ./cmd/packyard-server
+    binary: packyard-server
     env:
       - CGO_ENABLED=0
     goos:
@@ -29,7 +29,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/schochastics/pakman/internal/version.Version={{.Version}}
+      - -X github.com/schochastics/packyard/internal/version.Version={{.Version}}
 
 archives:
   - id: default
@@ -78,12 +78,12 @@ changelog:
 release:
   github:
     owner: schochastics
-    name: pakman
+    name: packyard
   draft: true
   prerelease: auto
   mode: replace
   header: |
-    ## pakman {{ .Tag }}
+    ## packyard {{ .Tag }}
   footer: |
     ---
 

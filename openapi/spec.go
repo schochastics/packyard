@@ -1,4 +1,4 @@
-// Package openapi exposes the pakman OpenAPI 3 spec as an embedded
+// Package openapi exposes the packyard OpenAPI 3 spec as an embedded
 // byte slice so the server can serve it at runtime without depending
 // on the filesystem.
 //
@@ -9,7 +9,7 @@ package openapi
 
 import _ "embed"
 
-// YAML is the pakman OpenAPI 3.0.3 spec in YAML form. Do NOT mutate.
+// YAML is the packyard OpenAPI 3.0.3 spec in YAML form. Do NOT mutate.
 //
 //go:embed openapi.yaml
 var YAML []byte

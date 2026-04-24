@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/api"
-	"github.com/schochastics/pakman/internal/cas"
-	"github.com/schochastics/pakman/internal/config"
-	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func newTestDeps(t *testing.T) api.Deps {
@@ -20,7 +20,7 @@ func newTestDeps(t *testing.T) api.Deps {
 	ctx := context.Background()
 	dir := t.TempDir()
 
-	database, err := db.Open(ctx, filepath.Join(dir, "pakman.sqlite"))
+	database, err := db.Open(ctx, filepath.Join(dir, "packyard.sqlite"))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

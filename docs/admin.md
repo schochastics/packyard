@@ -1,31 +1,31 @@
 # Admin reference
 
-Every admin operation is either a CLI subcommand on `pakman-server` or
+Every admin operation is either a CLI subcommand on `packyard-server` or
 a scoped HTTP endpoint. The CLI path is what operators use on the
 server host; the HTTP path is what CI and scripts reach for. Both are
 covered below.
 
 ## Server lifecycle
 
-### `pakman-server -init -data <dir>`
+### `packyard-server -init -data <dir>`
 
 Bootstraps a data directory. Writes default `channels.yaml` +
 `matrix.yaml` (if absent), creates `db.sqlite`, applies migrations,
 and reconciles channels. Idempotent — safe to run against an existing
 data dir.
 
-### `pakman-server -data <dir>` (or `-config <path>`)
+### `packyard-server -data <dir>` (or `-config <path>`)
 
 Starts the HTTP server. On start it re-reads `channels.yaml`,
 reconciles against the DB (additions/updates only — never deletes),
 and begins listening. SIGINT/SIGTERM triggers a 30-second graceful
 shutdown; in-flight publishes get a chance to finish.
 
-### `pakman-server -version`
+### `packyard-server -version`
 
 Prints the version string and exits.
 
-### `pakman-server -data <dir> -allow-anonymous-reads`
+### `packyard-server -data <dir> -allow-anonymous-reads`
 
 Starts the server with `allow_anonymous_reads` forced on regardless of
 what `server.yaml` says. Opens the **default channel only** to
@@ -34,17 +34,17 @@ and for deployments that want `install.packages()` to work without R
 clients carrying a bearer token. Non-default channels stay scoped.
 See [config.md](config.md) for the YAML equivalent.
 
-### `pakman-server -mint-token -data <dir> -scopes <csv> [-label <s>]`
+### `packyard-server -mint-token -data <dir> -scopes <csv> [-label <s>]`
 
 Creates a token directly against the DB without touching the HTTP
 surface. The plaintext token is printed on stdout (so it composes
-with shell pipelines like `TOKEN=$(pakman-server -mint-token …)`);
+with shell pipelines like `TOKEN=$(packyard-server -mint-token …)`);
 human-oriented context goes to stderr. This is the bootstrap path —
 after you have one `admin`-scoped token, prefer
 `POST /api/v1/admin/tokens` for everything else.
 
 ```sh
-ADMIN=$(pakman-server -mint-token -data ./data -scopes admin -label bootstrap)
+ADMIN=$(packyard-server -mint-token -data ./data -scopes admin -label bootstrap)
 ```
 
 ## Admin CLI subcommands
@@ -52,7 +52,7 @@ ADMIN=$(pakman-server -mint-token -data ./data -scopes admin -label bootstrap)
 Invocation grammar:
 
 ```
-pakman-server admin [-data DIR] [-config PATH] <verb> [args…]
+packyard-server admin [-data DIR] [-config PATH] <verb> [args…]
 ```
 
 `-data` / `-config` resolve the same way as the top-level flags:
@@ -72,7 +72,7 @@ Per-package failures go into a `failed` list but don't abort the run;
 the command exits non-zero at the end if anything failed.
 
 ```sh
-pakman-server admin -data ./data import drat https://drat.example.org -channel dev
+packyard-server admin -data ./data import drat https://drat.example.org -channel dev
 ```
 
 Event actor is `import-drat`; each import row has its tarball URL in
@@ -85,7 +85,7 @@ build`, then publishes the resulting tarball. Requires both `git` and
 `R` on `PATH`.
 
 ```sh
-pakman-server admin -data ./data import git \
+packyard-server admin -data ./data import git \
   https://git.example.org/foo.git -branch main -channel dev
 ```
 
@@ -99,7 +99,7 @@ Aligned text table of every channel with policy, default flag, package
 count, and most-recent publish time.
 
 ```sh
-$ pakman-server admin -data ./data channels list
+$ packyard-server admin -data ./data channels list
 NAME  POLICY     DEFAULT  PACKAGES  LATEST PUBLISH
 prod  immutable  yes      42        2026-04-18 14:23:11
 dev   mutable             71        2026-04-22 09:02:44
@@ -113,7 +113,7 @@ Every cell declared in `matrix.yaml` with binary count, coverage
 uploaded bytes.
 
 ```sh
-$ pakman-server admin -data ./data cells list
+$ packyard-server admin -data ./data cells list
 CELL                       OS                  ARCH   R    BINARIES  COVERAGE  SIZE
 ubuntu-24.04-amd64-r-4.5   linux ubuntu-24.04  amd64  4.5  40        40/42     512 MiB
 ubuntu-24.04-arm64-r-4.5   linux ubuntu-24.04  arm64  4.5  38        38/42     498 MiB
@@ -126,7 +126,7 @@ binary for that cell. Targets the "added a new cell, which packages
 still need to build?" workflow.
 
 ```sh
-$ pakman-server admin -data ./data cells show rhel-9-amd64-r-4.5
+$ packyard-server admin -data ./data cells show rhel-9-amd64-r-4.5
 cell rhel-9-amd64-r-4.5
   os     linux rhel-9
   arch   amd64
@@ -147,9 +147,9 @@ the orphans.
 
 ```sh
 # Preview:
-pakman-server admin -data ./data gc -dry-run
+packyard-server admin -data ./data gc -dry-run
 # Reclaim:
-pakman-server admin -data ./data gc
+packyard-server admin -data ./data gc
 ```
 
 Output format:
@@ -182,12 +182,12 @@ write — still not desirable).
 ### `admin reindex`
 
 Verifies that every sha256 the DB references has a matching blob in
-CAS. Pakman doesn't persist a `PACKAGES` index — the file is rebuilt
+CAS. Packyard doesn't persist a `PACKAGES` index — the file is rebuilt
 from the DB on every request and cached in memory for 5 minutes — so
 this is the actual recovery op after a DB or CAS restore.
 
 ```sh
-pakman-server admin -data ./data reindex
+packyard-server admin -data ./data reindex
 ```
 
 Missing blobs are printed as a table:
@@ -211,7 +211,7 @@ See [api.md](api.md) for full request/response schemas.
 Mint a token. Plaintext is returned once.
 
 ```sh
-curl -X POST http://pakman.corp/api/v1/admin/tokens \
+curl -X POST http://packyard.corp/api/v1/admin/tokens \
   -H "Authorization: Bearer $ADMIN" \
   -H "Content-Type: application/json" \
   -d '{"label":"ci","scopes":["publish:dev","read:*"]}'
@@ -223,7 +223,7 @@ List tokens. `last_used_at` tells you whether a token is still in use.
 
 ### `DELETE /api/v1/admin/tokens/{id}`
 
-Revoke. Immediate effect — pakman resolves the token against the DB on
+Revoke. Immediate effect — packyard resolves the token against the DB on
 every request.
 
 ## Observability
@@ -234,7 +234,7 @@ Public. Returns 200 with per-subsystem status when everything is up,
 503 `unavailable` when any subsystem fails its probe.
 
 ```sh
-curl -s http://pakman.corp/health | jq
+curl -s http://packyard.corp/health | jq
 ```
 
 Subsystem checks:
@@ -246,18 +246,18 @@ Subsystem checks:
 ### `/metrics`
 
 Public Prometheus text format. A hermetic registry is used, so only
-pakman-owned metrics appear (no Go stdlib metrics leaking through).
+packyard-owned metrics appear (no Go stdlib metrics leaking through).
 
 | Metric | Labels | Meaning |
 |---|---|---|
-| `pakman_http_requests_total` | `method`, `status` | Request counter at the HTTP layer. URL path is intentionally not a label — cardinality discipline. |
-| `pakman_http_request_duration_seconds` | `method`, `status` | Histogram, buckets `[5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s, 30s]`. |
-| `pakman_publish_total` | `channel`, `result` | `result` is `created` / `overwrote` / `already_existed`. |
-| `pakman_yank_total` | `channel` | Counter. |
-| `pakman_delete_total` | `channel` | Counter. |
-| `pakman_cas_bytes` | — | Gauge of `SUM(source_size) + SUM(size)` across the DB. Logical, not physical — use `du -sh <data>/cas` for on-disk. |
-| `pakman_token_create_total` | — | Token mints (both CLI and HTTP). |
-| `pakman_token_revoke_total` | — | Token revokes. |
+| `packyard_http_requests_total` | `method`, `status` | Request counter at the HTTP layer. URL path is intentionally not a label — cardinality discipline. |
+| `packyard_http_request_duration_seconds` | `method`, `status` | Histogram, buckets `[5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s, 30s]`. |
+| `packyard_publish_total` | `channel`, `result` | `result` is `created` / `overwrote` / `already_existed`. |
+| `packyard_yank_total` | `channel` | Counter. |
+| `packyard_delete_total` | `channel` | Counter. |
+| `packyard_cas_bytes` | — | Gauge of `SUM(source_size) + SUM(size)` across the DB. Logical, not physical — use `du -sh <data>/cas` for on-disk. |
+| `packyard_token_create_total` | — | Token mints (both CLI and HTTP). |
+| `packyard_token_revoke_total` | — | Token revokes. |
 
 ### Access log
 
@@ -275,7 +275,7 @@ writes a row to the `events` table. Read it via
 
 ## Upgrade procedure
 
-Pakman ships a single binary; upgrade is SIGTERM the old one, swap
+Packyard ships a single binary; upgrade is SIGTERM the old one, swap
 the binary, start the new one. Migrations run on start if needed.
 Always back up `<data-dir>/` before a non-patch upgrade (the phased
 rollout of schema changes in implementation.md §A2 means this should

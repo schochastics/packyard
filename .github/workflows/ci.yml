@@ -93,4 +93,4 @@ jobs:
         run: make build
 
       - name: Smoke test binary
-        run: ./pakman-server -version
+        run: ./packyard-server -version

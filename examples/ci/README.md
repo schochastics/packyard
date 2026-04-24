@@ -1,7 +1,7 @@
 # Reference CI workflow
 
 A drop-in publish workflow for teams that host their R packages in git
-(one package per repo) and want pushes to land in pakman. The template
+(one package per repo) and want pushes to land in packyard. The template
 at [publish.yml](publish.yml) runs on **GitHub Actions** and **Gitea
 Actions** unmodified.
 
@@ -10,10 +10,10 @@ Actions** unmodified.
 1. Copy `publish.yml` into your repo at `.github/workflows/publish.yml`
    (or `.gitea/workflows/publish.yml`).
 2. In your repo's CI settings, add:
-   - **Secret** `PAKMAN_TOKEN` — a bearer token with `publish:<channel>`
-     scope. Mint one with `pakman-server -mint-token -scopes publish:dev`.
-   - **Variable** `PAKMAN_SERVER` — the base URL of your pakman, e.g.
-     `https://pakman.corp` (no trailing slash).
+   - **Secret** `PACKYARD_TOKEN` — a bearer token with `publish:<channel>`
+     scope. Mint one with `packyard-server -mint-token -scopes publish:dev`.
+   - **Variable** `PACKYARD_SERVER` — the base URL of your packyard, e.g.
+     `https://packyard.corp` (no trailing slash).
 3. Push to `main` or `develop`. The workflow builds source + per-cell
    binaries and publishes.
 
@@ -35,7 +35,7 @@ publish endpoint rejects binaries for unknown cells. To discover what
 the server accepts:
 
 ```sh
-curl -H "Authorization: Bearer $PAKMAN_TOKEN" $PAKMAN_SERVER/api/v1/cells
+curl -H "Authorization: Bearer $PACKYARD_TOKEN" $PACKYARD_SERVER/api/v1/cells
 ```
 
 or open the `/ui/cells` page in the operator dashboard.
@@ -64,7 +64,7 @@ Remember to tighten the token scope if you broaden triggers.
 ## How publish failures surface
 
 The workflow uses `curl --fail-with-body`, so any non-2xx response
-prints the pakman error envelope (`error_code`, `message`, `hint` — see
+prints the packyard error envelope (`error_code`, `message`, `hint` — see
 [design.md §7.2](../../design.md)) and fails the job. Common causes:
 
 - **403** — token scope doesn't include the resolved channel.
@@ -80,7 +80,7 @@ prints the pakman error envelope (`error_code`, `message`, `hint` — see
   dependencies (GDAL, Stan, etc.) register a fatter cell in the
   server's `matrix.yaml` and point the matrix entry at that image.
 - **Monorepos** (multiple packages per repo). v1 is one-package-per-repo.
-- **A maintained `pakman-publish@v1` action.** Deliberately: the
+- **A maintained `packyard-publish@v1` action.** Deliberately: the
   canonical publish surface is the HTTP API, and a curl job keeps the
   failure modes simple and debuggable.
 

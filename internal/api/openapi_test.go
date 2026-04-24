@@ -14,7 +14,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
 	"github.com/getkin/kin-openapi/routers/gorillamux"
-	"github.com/schochastics/pakman/openapi"
+	"github.com/schochastics/packyard/openapi"
 )
 
 // TestOpenAPISpecIsValid confirms the embedded spec parses and type-
@@ -49,7 +49,7 @@ func TestServedSpecMatchesEmbedded(t *testing.T) {
 		t.Errorf("openapi field = %v, want 3.0.3", served["openapi"])
 	}
 	info, _ := served["info"].(map[string]any)
-	if info["title"] != "pakman" {
+	if info["title"] != "packyard" {
 		t.Errorf("info.title = %v", info["title"])
 	}
 }

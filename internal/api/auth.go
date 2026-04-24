@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/schochastics/pakman/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 const (

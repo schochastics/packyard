@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 func newImportTestDeps(t *testing.T, channel, policy string) Deps {

@@ -22,11 +22,11 @@ type ServerConfig struct {
 	// CAS blob store (cas/). Default "./data".
 	DataDir string `yaml:"data_dir"`
 
-	// ChannelsFile points at channels.yaml. When empty, pakman uses
+	// ChannelsFile points at channels.yaml. When empty, packyard uses
 	// <DataDir>/channels.yaml.
 	ChannelsFile string `yaml:"channels_file"`
 
-	// MatrixFile points at matrix.yaml. When empty, pakman uses
+	// MatrixFile points at matrix.yaml. When empty, packyard uses
 	// <DataDir>/matrix.yaml.
 	MatrixFile string `yaml:"matrix_file"`
 
@@ -146,7 +146,7 @@ func (c *ServerConfig) validate() error {
 
 // resolveRelative converts every path field that isn't already absolute
 // into an absolute path relative to base. Called from LoadServer so
-// paths in a config read from /etc/pakman/server.yaml don't silently
+// paths in a config read from /etc/packyard/server.yaml don't silently
 // resolve against the server's working directory.
 func (c *ServerConfig) resolveRelative(base string) {
 	resolve := func(p string) string {

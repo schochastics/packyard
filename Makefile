@@ -1,14 +1,14 @@
 .PHONY: all build test fmt vet lint openapi-lint check clean help
 
-BIN          := pakman-server
-CMD_DIR      := ./cmd/pakman-server
-VERSION_PKG  := github.com/schochastics/pakman/internal/version
+BIN          := packyard-server
+CMD_DIR      := ./cmd/packyard-server
+VERSION_PKG  := github.com/schochastics/packyard/internal/version
 VERSION      := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS      := -s -w -X $(VERSION_PKG).Version=$(VERSION)
 
 all: check build ## Run checks and build binary
 
-build: ## Build the pakman-server binary
+build: ## Build the packyard-server binary
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) $(CMD_DIR)
 
 test: ## Run all tests

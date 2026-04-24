@@ -1,7 +1,7 @@
 # HTTP API reference
 
 Authoritative machine-readable spec: `GET /api/v1/openapi.json` (or
-`.yaml`) on any running pakman. The source document is
+`.yaml`) on any running packyard. The source document is
 [openapi/openapi.yaml](../openapi/openapi.yaml). This page is the
 curl-level companion — the spec covers schemas in full, but clients
 and humans want copy-pasteable requests. The two stay in sync via
@@ -12,7 +12,7 @@ prefix; additive changes happen in-place.
 
 ## Conventions
 
-- **Base URL.** `http://$PAKMAN_SERVER` — everything documented here is
+- **Base URL.** `http://$PACKYARD_SERVER` — everything documented here is
   relative to that.
 - **Auth.** `Authorization: Bearer <token>` on every non-public endpoint.
   `/health`, `/metrics`, and the OpenAPI endpoints are unauthenticated.
@@ -101,7 +101,7 @@ Both are unauthenticated so SDK generators can pull without a token.
 ### Admin tokens
 
 Admin-scope required on all three. Plaintext tokens are returned **once**
-on create and never again; pakman stores sha256(token) only.
+on create and never again; packyard stores sha256(token) only.
 
 #### `POST /api/v1/admin/tokens`
 
@@ -132,7 +132,7 @@ authenticated request that resolves to this token.
 #### `DELETE /api/v1/admin/tokens/{id}`
 
 Revokes the token. Existing `/ui/` sessions using the revoked token
-become anonymous on the very next request (pakman does not cache
+become anonymous on the very next request (packyard does not cache
 identity — every request hits the tokens table).
 
 ### JSON read surface
@@ -160,7 +160,7 @@ curl -s -H "Authorization: Bearer $ADMIN" \
 ```
 
 Each package carries an inline `binaries` array — this is the one
-documented exception to pakman's otherwise-flat response shape.
+documented exception to packyard's otherwise-flat response shape.
 
 #### `GET /api/v1/cells`
 
@@ -269,7 +269,7 @@ Required scope: `admin`. On immutable channels this returns 409
 
 ### CRAN-protocol reads
 
-These endpoints exist to make pakman indistinguishable from a CRAN
+These endpoints exist to make packyard indistinguishable from a CRAN
 repo to standard R tooling. No bearer token required unless
 `allow_anonymous_reads` is false on the channel.
 
@@ -288,7 +288,7 @@ repo to standard R tooling. No bearer token required unless
 #### Default-channel alias
 
 Everything above is also mounted at the root so
-`options(repos="http://pakman.corp/")` works unmodified:
+`options(repos="http://packyard.corp/")` works unmodified:
 
 - `GET /src/contrib/PACKAGES` → default channel's source index.
 - `GET /bin/linux/{cell}/PACKAGES` → default channel's binary index.
@@ -297,10 +297,10 @@ R configuration:
 
 ```r
 # Point only at the default channel (simplest):
-options(repos = c(PAKMAN = "http://pakman.corp/", getOption("repos")))
+options(repos = c(PACKYARD = "http://packyard.corp/", getOption("repos")))
 
 # Explicit channel:
-options(repos = c(PAKMAN_DEV = "http://pakman.corp/dev/", getOption("repos")))
+options(repos = c(PACKYARD_DEV = "http://packyard.corp/dev/", getOption("repos")))
 ```
 
 ## Scopes

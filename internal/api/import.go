@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/schochastics/pakman/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 // ImportInput is the in-process equivalent of the multipart publish

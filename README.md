@@ -1,15 +1,15 @@
-# pakman
+# packyard
 
-[![CI](https://github.com/schochastics/pakman/actions/workflows/ci.yml/badge.svg)](https://github.com/schochastics/pakman/actions/workflows/ci.yml)
+[![CI](https://github.com/schochastics/packyard/actions/workflows/ci.yml/badge.svg)](https://github.com/schochastics/packyard/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/schochastics/pakman?include_prereleases&sort=semver)](https://github.com/schochastics/pakman/releases)
+[![Release](https://img.shields.io/github/v/release/schochastics/packyard?include_prereleases&sort=semver)](https://github.com/schochastics/packyard/releases)
 
 **An open-source, single-binary R package registry for *internal* R
 packages** — think "private CRAN for your organisation". Users point
-their R installations at both pakman (for internal packages) and
+their R installations at both packyard (for internal packages) and
 upstream [CRAN](https://cran.r-project.org/) / [Posit Package
 Manager](https://packagemanager.posit.co/) / [r-universe](https://r-universe.dev/)
-(for public packages), as two entries in `repos`. Pakman serves a
+(for public packages), as two entries in `repos`. Packyard serves a
 CRAN-protocol-compatible read surface, so existing R tooling
 (`install.packages`, [renv](https://rstudio.github.io/renv/),
 [pak](https://pak.r-lib.org/)) works out of the box.
@@ -17,8 +17,8 @@ CRAN-protocol-compatible read surface, so existing R tooling
 ## Quickstart
 
 ```sh
-docker run --rm -d --name pakman -p 8080:8080 -v pakman-data:/data \
-  ghcr.io/schochastics/pakman:latest
+docker run --rm -d --name packyard -p 8080:8080 -v packyard-data:/data \
+  ghcr.io/schochastics/packyard:latest
 ```
 
 Full walkthrough (Docker → admin token → publish → install from R):
@@ -59,18 +59,18 @@ relationship (PPM is the right answer), individual users (use
 - **Not a [Posit Package Manager](https://docs.posit.co/rspm/)
   replacement.** PPM is a strong commercial product with a Linux binary
   farm, dated snapshots, `SystemRequirements` translation, and
-  enterprise features pakman does not try to match. Pakman fills the
+  enterprise features packyard does not try to match. Packyard fills the
   slot PPM doesn't: open-source, lightweight, self-hosted for internal
   packages.
-- **Not a client CLI.** Existing R tools drive pakman.
+- **Not a client CLI.** Existing R tools drive packyard.
   [uvr](https://github.com/nbafrank/uvr) and
   [rv](https://github.com/A2-ai/rv) occupy the uv-shaped client space;
-  pakman aims to be a well-documented publish destination for them.
-- **Not a CRAN mirror in v1.** Configure R with pakman **alongside**
+  packyard aims to be a well-documented publish destination for them.
+- **Not a CRAN mirror in v1.** Configure R with packyard **alongside**
   upstream CRAN; air-gap deploy with a bundled CRAN mirror is the
   committed v1.x roadmap (see below).
 - **Not server-side building in v1.** CI builds per cell and uploads;
-  pakman indexes and serves. The cell-identity machinery in v1 already
+  packyard indexes and serves. The cell-identity machinery in v1 already
   supports server-side builds later without a schema change.
 
 ## Install
@@ -78,8 +78,8 @@ relationship (PPM is the right answer), individual users (use
 ### Docker (recommended)
 
 ```sh
-docker run --rm -d --name pakman -p 8080:8080 -v pakman-data:/data \
-  ghcr.io/schochastics/pakman:latest
+docker run --rm -d --name packyard -p 8080:8080 -v packyard-data:/data \
+  ghcr.io/schochastics/packyard:latest
 ```
 
 Images are published for each tagged release. The container initialises
@@ -89,12 +89,12 @@ non-root user.
 ### Binary
 
 Download the matching tarball from
-[GitHub releases](https://github.com/schochastics/pakman/releases), or:
+[GitHub releases](https://github.com/schochastics/packyard/releases), or:
 
 ```sh
-go install github.com/schochastics/pakman/cmd/pakman-server@latest
-pakman-server -init -data ./data
-pakman-server -data ./data
+go install github.com/schochastics/packyard/cmd/packyard-server@latest
+packyard-server -init -data ./data
+packyard-server -data ./data
 ```
 
 The binary is a single static executable; no C runtime required.
@@ -106,14 +106,14 @@ The binary is a single static executable; no C runtime required.
 | [quickstart.md](docs/quickstart.md) | Five-minute zero-to-publish walkthrough. |
 | [api.md](docs/api.md) | HTTP API reference, curl examples, error codes. |
 | [config.md](docs/config.md) | `channels.yaml`, `matrix.yaml`, server config. |
-| [admin.md](docs/admin.md) | `pakman-server admin …` commands. |
-| [migration.md](docs/migration.md) | Moving from drat or git to pakman. |
+| [admin.md](docs/admin.md) | `packyard-server admin …` commands. |
+| [migration.md](docs/migration.md) | Moving from drat or git to packyard. |
 | [design.md](design.md) | Architecture and scope. |
 | [implementation.md](implementation.md) | Phased build plan and status. |
 | [examples/ci/README.md](examples/ci/README.md) | Reference CI workflow. |
 
 The OpenAPI spec is also served at `/api/v1/openapi.json` (and
-`.yaml`) from any running pakman.
+`.yaml`) from any running packyard.
 
 ## Roadmap
 
@@ -149,7 +149,7 @@ The OpenAPI spec is also served at `/api/v1/openapi.json` (and
 
 ## Contributing
 
-Pakman follows a plan-driven workflow: every feature lands as a
+Packyard follows a plan-driven workflow: every feature lands as a
 numbered task in [implementation.md](implementation.md) so the scope
 and ordering are visible. Before opening a PR, please skim the design
 and implementation docs for context. Issues and discussions are open

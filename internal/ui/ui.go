@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/schochastics/pakman/internal/auth"
-	"github.com/schochastics/pakman/internal/config"
-	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 // Deps bundles everything the UI handlers need.
@@ -24,7 +24,7 @@ type Deps struct {
 	SecureCookies bool                 // set Secure flag on Set-Cookie (production)
 }
 
-// Handler is the pakman UI handler. Expected mount point is /ui/ on the
+// Handler is the packyard UI handler. Expected mount point is /ui/ on the
 // parent mux; the strip + route table below assumes that.
 type Handler struct {
 	deps      Deps

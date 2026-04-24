@@ -1,7 +1,7 @@
 # examples/ci/publish.yml — reference template for publishing an R package
-# to pakman. Works on GitHub Actions and Gitea Actions. Requires:
-#   - Repo secret PAKMAN_TOKEN with publish:<channel> scope.
-#   - Repo variable PAKMAN_SERVER (e.g. https://pakman.corp).
+# to packyard. Works on GitHub Actions and Gitea Actions. Requires:
+#   - Repo secret PACKYARD_TOKEN with publish:<channel> scope.
+#   - Repo variable PACKYARD_SERVER (e.g. https://packyard.corp).
 #   - Cells below must match the server's matrix.yaml (GET /api/v1/cells).
 #
 # Baked-in assumptions (see design.md §8.4 for rationale):
@@ -11,7 +11,7 @@
 #   - Branch-to-channel mapping is a hardcoded case: main -> prod, everything
 #     else -> dev. Fork and edit to taste.
 
-name: Publish to pakman
+name: Publish to packyard
 
 on:
   push:
@@ -71,8 +71,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { path: artifacts }
       - env:
-          PAKMAN_SERVER: ${{ vars.PAKMAN_SERVER }}
-          PAKMAN_TOKEN:  ${{ secrets.PAKMAN_TOKEN }}
+          PACKYARD_SERVER: ${{ vars.PACKYARD_SERVER }}
+          PACKYARD_TOKEN:  ${{ secrets.PACKYARD_TOKEN }}
           PKG:           ${{ needs.build-source.outputs.package }}
           VER:           ${{ needs.build-source.outputs.version }}
           CHANNEL:       ${{ steps.channel.outputs.name }}
@@ -93,7 +93,7 @@ jobs:
           done
           echo "$MANIFEST" > manifest.json
           curl --fail-with-body -X POST \
-            -H "Authorization: Bearer $PAKMAN_TOKEN" \
+            -H "Authorization: Bearer $PACKYARD_TOKEN" \
             -F "manifest=@manifest.json;type=application/json" \
             "${CURL_FILES[@]}" \
-            "$PAKMAN_SERVER/api/v1/packages/$CHANNEL/$PKG/$VER"
+            "$PACKYARD_SERVER/api/v1/packages/$CHANNEL/$PKG/$VER"

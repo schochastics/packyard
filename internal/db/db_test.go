@@ -5,14 +5,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/schochastics/pakman/internal/db"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func TestOpenAppliesPragmas(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "pakman.sqlite")
+	path := filepath.Join(t.TempDir(), "packyard.sqlite")
 
 	database, err := db.Open(ctx, path)
 	if err != nil {
@@ -72,7 +72,7 @@ func TestOpenMissingDirFails(t *testing.T) {
 
 	ctx := context.Background()
 	// Path under a directory that doesn't exist — SQLite should fail on open.
-	path := filepath.Join(t.TempDir(), "nope", "pakman.sqlite")
+	path := filepath.Join(t.TempDir(), "nope", "packyard.sqlite")
 
 	if _, err := db.Open(ctx, path); err == nil {
 		t.Fatal("expected error for missing parent directory, got nil")

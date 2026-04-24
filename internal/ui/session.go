@@ -21,7 +21,7 @@ import (
 // The name is deliberately distinct from anything else so an existing
 // "auth" or "token" cookie from another service on the same host can't
 // collide.
-const sessionCookieName = "pakman_ui"
+const sessionCookieName = "packyard_ui"
 
 // defaultSessionTTL is how long an operator stays logged in before the
 // UI prompts for a token again. Tokens themselves can be rotated or

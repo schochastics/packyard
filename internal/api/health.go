@@ -17,7 +17,7 @@ type HealthResponse struct {
 }
 
 // handleHealth reports overall liveness plus the state of each
-// subsystem pakman depends on. Returns 200 when everything is ok,
+// subsystem packyard depends on. Returns 200 when everything is ok,
 // 503 when anything fails — that's the signal load balancers read
 // to pull the host out of rotation.
 //

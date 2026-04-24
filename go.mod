@@ -1,4 +1,4 @@
-module github.com/schochastics/pakman
+module github.com/schochastics/packyard
 
 go 1.25.0
 
