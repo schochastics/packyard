@@ -1,0 +1,118 @@
+name: Post-release smoke
+
+# Runs after the Release workflow finishes (regardless of draft
+# status — goreleaser pushes GHCR images even for drafts). Pulls
+# the tagged image, runs -version, and hits /health against a live
+# container. Would have caught the v1.0.0 auto-bootstrap bug that
+# shipped to GHCR before a human noticed.
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: read
+  issues: write # needed to open a regression issue on failure
+
+jobs:
+  smoke:
+    name: Smoke ghcr.io image
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          # workflow_run.head_branch is the tag ref (e.g. v1.0.2)
+          # when the source workflow was triggered by a tag push.
+          tag="${HEAD_BRANCH}"
+          if [ -z "$tag" ]; then
+            echo "no head_branch on workflow_run event; skipping"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # GHCR tags strip the leading v: vX.Y.Z -> X.Y.Z.
+          image_tag="${tag#v}"
+          echo "git_tag=$tag"         >> "$GITHUB_OUTPUT"
+          echo "image_tag=$image_tag" >> "$GITHUB_OUTPUT"
+          echo "skip=false"           >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: steps.tag.outputs.skip != 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull image
+        if: steps.tag.outputs.skip != 'true'
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+        run: |
+          docker pull "ghcr.io/${{ github.repository }}:$IMAGE_TAG"
+
+      - name: -version matches tag
+        if: steps.tag.outputs.skip != 'true'
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+        run: |
+          got=$(docker run --rm "ghcr.io/${{ github.repository }}:$IMAGE_TAG" -version)
+          echo "image -version: $got"
+          if [ "$got" != "$IMAGE_TAG" ]; then
+            echo "::error::version string mismatch: got=$got want=$IMAGE_TAG"
+            exit 1
+          fi
+
+      - name: Boot + health probe
+        if: steps.tag.outputs.skip != 'true'
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+        run: |
+          docker run -d --name packyard-smoke -p 8080:8080 \
+            -v packyard-smoke-data:/data \
+            "ghcr.io/${{ github.repository }}:$IMAGE_TAG" \
+            -data /data -allow-anonymous-reads
+
+          # Wait up to 30 s for /health to return 200.
+          for i in $(seq 1 30); do
+            if curl -sf -o /dev/null http://localhost:8080/health; then
+              echo "health ok after ${i}s"
+              docker logs packyard-smoke || true
+              exit 0
+            fi
+            sleep 1
+          done
+
+          echo "::error::packyard /health never returned 200"
+          docker logs packyard-smoke || true
+          exit 1
+
+      - name: File regression issue
+        if: failure() && steps.tag.outputs.skip != 'true'
+        uses: actions/github-script@v7
+        env:
+          GIT_TAG: ${{ steps.tag.outputs.git_tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        with:
+          script: |
+            const tag = process.env.GIT_TAG;
+            const runUrl = process.env.RUN_URL;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Release regression: ${tag} failed post-release smoke`,
+              body: [
+                `The released image \`ghcr.io/${context.repo.owner}/${context.repo.repo}:${tag.replace(/^v/, '')}\` failed the post-release smoke workflow.`,
+                ``,
+                `- Run: ${runUrl}`,
+                `- Likely causes: auto-bootstrap broken, /health regression, version ldflag drift.`,
+                ``,
+                `Diagnose, fix on main, cut the next patch.`,
+              ].join('\n'),
+              labels: ['release-regression'],
+            });
