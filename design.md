@@ -97,7 +97,7 @@ Packyard is a focused OSS project serving a real but narrow niche. It is not try
 
 ### 1.1 v1 launch deliverables
 
-> **Status (April 2026):** all eight deliverables shipped in v1.0.x. See [implementation.md](implementation.md) for the phase-by-phase build record and `§Post-v1 follow-ups (v1.1)` for residual items.
+> **Status (April 2026):** all eight deliverables shipped in v1.0.x. See [implementation.md](implementation.md) for the phase-by-phase build record and `§Post-v1 follow-ups (v1.1)` for residual items. The committed v1.x air-gap feature is now spec'd in §10 — bundle format and bundler ship today; the `admin import bundle` command is the next implementation round.
 
 A full v1 release is more than the server binary. First-hour friction kills adoption faster than missing features, so the v1 bundle includes adoption-critical tooling alongside the server:
 
@@ -788,22 +788,117 @@ Expressed via §11 tokens; the server does not enforce the pattern.
 
 ## 10. CRAN mirror + air-gap deploy (roadmap, not v1)
 
-Not in v1. Users configure R to hit packyard for internal packages and upstream CRAN / PPM / r-universe for public ones — see §6. Captured here as the design inputs so the future feature lands without retrofitting.
+Not in v1. Users configure R to hit packyard for internal packages and upstream CRAN / PPM / r-universe for public ones — see §6. v1.x adds the air-gap path: pre-built CRAN bundles that operators carry across an air-gap and import into packyard. Operator playbook lives in [docs/airgap.md](docs/airgap.md); the bundler is in [examples/bundler/](examples/bundler/).
 
-**Design inputs from target users (e.g., `cynkra`):**
+### 10.1 Design inputs from target users
 
 - Organisations typically pin **one fixed CRAN snapshot per supported R version** and never mutate it. Reproducibility of past analyses depends on this.
 - "Latest R" is the exception: its snapshot is a moving target pointing at the most recent upstream state. Moving targets don't work in air-gap.
-- Updating a snapshot is an operator-initiated, infrequent event (weeks or months, not hours). A regular *cadence* (e.g. quarterly) is plausible but implementation is v1.x's problem.
+- Updating a snapshot is an operator-initiated, infrequent event (weeks or months, not hours). A regular cadence (e.g. quarterly) is plausible.
+- **Most regulated orgs need 50–200 packages**, not all of CRAN. A "subset of CRAN" workflow is a first-class case, not a footnote.
 
-**Implied shape of the future feature:**
+### 10.2 The bundle format is the API
 
-- A CRAN mirror is just another packyard channel (per §4), served read-only from the publish API's perspective.
-- Per-(channel, R-minor) snapshot pinning. An immutable channel like `cran-r4.4-2026q1` is the typical shape. A moving `cran-r-latest` channel is a separate, opt-in policy.
-- Sync-bundle format: a tarball containing the delta since the previous snapshot, plus metadata (signed manifest, source hashes, content-addressable layout). Importable on a disconnected host via `packyard-server import-bundle`.
-- Air-gap deploy = single container image + mounted data volume + `import-bundle` at bootstrap. No runtime network egress required.
+The on-disk bundle layout matches CRAN's URL structure exactly so that bundles are useful even outside packyard. Operators can audit them with standard tools, sign them with whatever their security policy mandates, and — if they don't want to run packyard — drop a bundle behind any static web server and `install.packages()` works. That's the whole "tarball CRAN" story: the bundle *is* a CRAN mirror, packyard just adds the audit trail and channel scoping on top.
 
-None of this is implemented in v1. What v1 *does* preserve is compatibility: the channel model, URL layout, and CAS are designed so adding CRAN mirror channels later doesn't change any existing contract.
+```
+bundle/
+  src/contrib/
+    PACKAGES
+    PACKAGES.gz
+    PACKAGES.rds
+    <pkg>_<ver>.tar.gz
+    ...
+  manifest.json
+```
+
+`manifest.json` is the only non-stock-CRAN file. Schema `packyard-bundle/1`:
+
+```json
+{
+  "schema": "packyard-bundle/1",
+  "snapshot_id": "cran-r4.4-2026q1",
+  "r_version": "4.4",
+  "source_url": "https://cloud.r-project.org",
+  "mode": "subset",
+  "created_at": "2026-04-25T07:44:08Z",
+  "tool": "examples/bundler/build-bundle.R (miniCRAN 0.3.2, R 4.5.2)",
+  "input_packages": ["ggplot2", "dplyr", ...],
+  "packages": [
+    { "name": "ggplot2", "version": "3.5.1",
+      "path": "src/contrib/ggplot2_3.5.1.tar.gz",
+      "sha256": "abc123...", "size": 4123456 },
+    ...
+  ]
+}
+```
+
+Decoupling the format from the producer means operators who already have rsync-of-CRAN, PPM CLI exports, or a hand-rolled pipeline can keep using them — they just need to write a `manifest.json` alongside whatever directory they produce.
+
+### 10.3 Bundle producer = R script, not a packyard binary
+
+The bundler is an R script at [`examples/bundler/build-bundle.R`](examples/bundler/build-bundle.R) that wraps `miniCRAN::makeRepo()`. Two reasons:
+
+- The R-side dependency resolver already understands `Imports` / `Depends` / `LinkingTo`, version constraints in DESCRIPTION, and `Priority: base/recommended` exclusions. Reimplementing in Go is a year of edge cases that miniCRAN's maintainers track for free.
+- The connected build host needs network and R; for the regulated-org segment, that's a CI runner or a dev laptop — already available.
+
+Two modes, same script:
+
+| Mode | Input | Produces |
+|---|---|---|
+| Subset (`--packages packages.txt`) | one package name per line | the dependency closure of those packages, sources only |
+| Full (`--full`) | _(none)_ | every CRAN package available for the requested R minor, sources only |
+
+Operators who already produce CRAN-shaped output by other means write their own `manifest.json` and feed it to `import bundle` directly.
+
+### 10.4 Mirror channels are just channels
+
+No new channel type. A "mirror channel" is a regular [§3](#3-entities) channel with `overwrite_policy: immutable` and a name that starts `cran-` by convention. Per-(R-minor, snapshot) naming is recommended:
+
+```
+cran-r4.4-2026q1
+cran-r4.5-2026q2
+cran-internal-baseline
+```
+
+Multiple mirror channels per server is expected. R configurations enumerate the relevant snapshot in `repos =`. Old channels stay forever — pharma audit trails depend on "version X of analysis was reproducible against snapshot Y." A "moving" mirror channel (`overwrite_policy: mutable`, re-imported regularly) is *possible* but not blessed; the operator owns the policy.
+
+The data model and CAS already handle this — an imported CRAN tarball goes through the same publish path as a CI-pushed package, just batched and from a different source.
+
+### 10.5 Importing — `admin import bundle`
+
+```sh
+packyard-server admin import bundle ./cran-r4.4-2026q1.tar.gz \
+  --channel cran-r4.4-2026q1
+```
+
+Behaviour:
+
+1. Create the channel with `overwrite_policy: immutable` if it doesn't exist.
+2. Verify the bundle's `manifest.json` against schema `packyard-bundle/1`.
+3. For each entry in `manifest.packages`, sha256-verify the tarball against the manifest, then write to CAS. Blobs already in CAS (from a previous snapshot) are deduplicated automatically.
+4. Insert per-package DB rows referencing the CAS blobs.
+5. Append an audit event per package imported.
+
+Mismatched sha256 aborts the whole import — partial imports are not allowed.
+
+### 10.6 Update model
+
+Bundles are full snapshots. There are no diff bundles in v1.x: CAS dedup makes overlap-heavy re-imports cheap (95%-overlapping bundle adds only the new packages to disk), and the operational simplicity of "every bundle is a complete snapshot" outweighs the disk-saving optimization.
+
+Quarterly cadence is the typical shape: build a fresh full bundle on the connected side, transport, `import bundle --channel cran-r4.4-<NEW>`. The old channel stays. R configs that pinned to it still work forever.
+
+Diff bundles, dated channel snapshots backed by retention policies, and rotating-channel automation are v1.y once we see real operational telemetry.
+
+### 10.7 Signing — required hashes, optional crypto
+
+Per-package sha256 in `manifest.json` is mandatory. Bundle-level cryptographic signing (cosign / minisign / gpg over `manifest.json`) is opt-in and documented but not enforced by `import bundle`. Key management — who owns the key, how it crosses the air-gap, rotation policy — varies per org and isn't packyard's call to make.
+
+In v1.y, native signature verification (sigstore-friendly bundle-level attestations) might land if there's demand. The current shape is forward-compatible: the signature lives next to `manifest.json` and `import bundle` could opt-in-verify it without a format change.
+
+### 10.8 What this preserves from v1
+
+The channel model, URL layout, CAS, and publish path are unchanged. Adding CRAN mirror channels later doesn't change any existing contract — the import path is a new admin command that uses existing primitives (channel reconcile, CAS write, event append). Operators who don't need air-gap aren't affected at all.
 
 ---
 

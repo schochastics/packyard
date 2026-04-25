@@ -117,6 +117,7 @@ The binary is a single static executable; no C runtime required.
 | [config.md](docs/config.md) | `channels.yaml`, `matrix.yaml`, server config. |
 | [admin.md](docs/admin.md) | `packyard-server admin …` commands. |
 | [backup-restore.md](docs/backup-restore.md) | Snapshots, rsync cadence, and restore verification. |
+| [airgap.md](docs/airgap.md) | Air-gap deploy + CRAN bundle import (v1.x preview — bundler shipped, importer in progress). |
 | [migration.md](docs/migration.md) | Moving from drat or git to packyard. |
 | [design.md](design.md) | Architecture and scope. |
 | [implementation.md](implementation.md) | Phased build plan and status. |
@@ -140,10 +141,14 @@ The OpenAPI spec is also served at `/api/v1/openapi.json` (and
 
 ### v1.x
 
-- **Air-gap deploy with a bundled CRAN / Bioconductor mirror.** The
-  defining post-v1 feature and the gating requirement for regulated-org
-  targets. Sync-bundle format, signing, snapshot cadence, and
-  "updating CRAN on prod" workflow are a whole design project.
+- **Air-gap deploy with a bundled CRAN mirror.** The defining
+  post-v1 feature and the gating requirement for regulated-org
+  targets. **Spec landed; partial implementation:** bundle format,
+  the operator playbook, and the [`build-bundle.R`](examples/bundler/build-bundle.R)
+  bundler ship today. The receiving `packyard-server admin import
+  bundle` command is the next implementation round. See
+  [docs/airgap.md](docs/airgap.md). Bioconductor support deferred
+  to v1.y.
 - **Server-side binary build farm.** v1 receives pre-built artifacts
   from CI; v1.x adds the option to build server-side for teams that
   don't want a CI pipeline per package. Cell schema is already ready.
