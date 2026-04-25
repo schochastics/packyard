@@ -2,11 +2,9 @@
 
 Operator-facing walkthrough for running packyard on a host with no
 internet egress and getting CRAN packages onto it via offline
-sync-bundles. This is a v1.x feature in design — the bundle
-*producer* (an R script) is shipped today, the *importer*
-(`packyard-server admin import bundle`) is the next implementation
-round. This doc describes the end-to-end workflow as it will land,
-so operators can plan around it.
+sync-bundles. As of v1.x both halves of the workflow ship: the
+bundle *producer* (an R script under `examples/bundler/`) and the
+*importer* (`packyard-server admin import bundle`).
 
 For the design rationale, see [design.md §10](../design.md). For
 the bundler itself, see [examples/bundler/](../examples/bundler/).
@@ -113,18 +111,34 @@ out-of-band so you can spot a corrupted transfer.
 
 ### 5. Import on the disconnected packyard host
 
+First, declare the snapshot channel in `channels.yaml`. Packyard does
+not auto-create channels on import — `channels.yaml` is the source of
+truth for channel policy, and an air-gap snapshot needs to be
+explicitly immutable.
+
+```yaml
+# channels.yaml
+- name: cran-r4.4-2026q1
+  overwrite_policy: immutable
+```
+
+Restart the server (or re-run `packyard-server -init`) so the channel
+gets reconciled into the DB, then run the import:
+
 ```sh
 packyard-server admin import bundle ./cran-r4.4-2026q1.tar.gz \
-  --channel cran-r4.4-2026q1
+  -channel cran-r4.4-2026q1
 ```
 
 What happens:
 
-- Packyard creates the channel (`overwrite_policy: immutable`) if
-  it doesn't exist.
-- Each tarball is sha256-verified against `manifest.json` and
-  written to the CAS. Blobs already present (from a previous
-  snapshot) are deduplicated automatically.
+- The bundle's `manifest.json` is validated (schema must be
+  `packyard-bundle/1`).
+- **Pre-flight:** every tarball is sha256-verified against the
+  manifest. Any mismatch aborts before any side effects — neither
+  CAS nor DB is touched.
+- Each tarball is then written to CAS. Blobs already present (from
+  a previous snapshot) are deduplicated automatically.
 - Per-package DB rows are inserted referencing the CAS blobs.
 - An audit event is appended for every package imported.
 
@@ -209,7 +223,7 @@ compilers for their internal packages anyway.
 | Bundle format spec | Frozen — schema `packyard-bundle/1` |
 | Bundler script | Shipped in [`examples/bundler/`](../examples/bundler/) |
 | Air-gap operator playbook | This doc |
-| `admin import bundle` CLI | **Not yet implemented** — next implementation round |
+| `admin import bundle` CLI | Shipped — see [admin.md](admin.md#admin-import-bundle-path-or-targz--channel-name) |
 | Bundle-level signing enforcement | Deferred; manifest sha256 mandatory, ed25519 optional |
 | Bioconductor support | Deferred; same format applies |
 | Diff bundles | Deferred; full bundles + CAS dedup is enough at v1.x scale |

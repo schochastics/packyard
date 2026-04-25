@@ -93,6 +93,41 @@ Package name + version are parsed from `DESCRIPTION` before the build
 step so the output message is meaningful even if `R CMD build` fails.
 Temp clone and build dirs are cleaned up on exit.
 
+### `admin import bundle <path-or-targz> -channel <name>`
+
+Imports a `packyard-bundle/1` bundle (the format produced by
+[`examples/bundler/build-bundle.R`](../examples/bundler/build-bundle.R))
+into the named channel. The path argument may be a directory laid out
+as documented in [design.md §10](../design.md) or a `.tar.gz` / `.tgz`
+archive of one — archives are extracted to a tempdir for the duration
+of the import.
+
+```sh
+packyard-server admin -data ./data import bundle \
+  ./cran-r4.4-2026q1.tar.gz -channel cran-r4.4-2026q1
+```
+
+The target channel must already exist in `channels.yaml` with
+`overwrite_policy: immutable` — the importer does not auto-create it
+because `channels.yaml` is the source of truth for channel policy and
+an air-gap snapshot must not be silently mutable.
+
+What happens, in order:
+
+1. **Manifest validation.** Schema must be `packyard-bundle/1`;
+   unknown schemas are rejected at the gate.
+2. **Pre-flight sha256 verification.** Every tarball is hashed and
+   compared to its manifest entry. **Any mismatch aborts before any
+   side effects** — neither CAS nor the DB is touched. This matches
+   the spec: partial imports are not allowed.
+3. **Per-package import.** Each tarball is published in-process via
+   the same path CI publishes use, so CAS dedup, idempotent re-import,
+   and immutable-policy enforcement all work the same way.
+
+Re-running the same bundle is cheap and idempotent: matching content
+already in CAS counts as `skipped`, mismatched content on an immutable
+channel surfaces as a per-package failure.
+
 ### `admin channels list`
 
 Aligned text table of every channel with policy, default flag, package

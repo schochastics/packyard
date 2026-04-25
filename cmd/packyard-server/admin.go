@@ -25,8 +25,9 @@ import (
 //
 // where <verb> is one of:
 //
-//	import drat <repo-url> -channel <name>
-//	import git  <repo-url> [-branch <b>] -channel <name>
+//	import drat   <repo-url>      -channel <name>
+//	import git    <repo-url>      [-branch <b>] -channel <name>
+//	import bundle <path-or-targz> -channel <name>
 func adminMain(args []string) error {
 	if len(args) == 0 {
 		return adminUsageError("admin: missing verb")
@@ -497,15 +498,17 @@ func adminCellsShow(cfg *config.ServerConfig, args []string) error {
 // adminImport routes `admin import <source> …`.
 func adminImport(cfg *config.ServerConfig, args []string) error {
 	if len(args) == 0 {
-		return adminUsageError("admin import: missing source (drat|git)")
+		return adminUsageError("admin import: missing source (drat|git|bundle)")
 	}
 	switch args[0] {
 	case "drat":
 		return adminImportDrat(cfg, args[1:])
 	case "git":
 		return adminImportGit(cfg, args[1:])
+	case "bundle":
+		return adminImportBundle(cfg, args[1:])
 	default:
-		return adminUsageError("admin import: unknown source %q (expected drat|git)", args[0])
+		return adminUsageError("admin import: unknown source %q (expected drat|git|bundle)", args[0])
 	}
 }
 
@@ -539,6 +542,53 @@ func adminImportDrat(cfg *config.ServerConfig, args []string) error {
 
 	fmt.Printf("imported=%d skipped=%d failed=%d\n",
 		len(res.Imported), len(res.Skipped), len(res.Failed))
+	for _, f := range res.Failed {
+		fmt.Fprintf(os.Stderr, "  fail %s@%s: %v\n", f.Package, f.Version, f.Err)
+	}
+	if len(res.Failed) > 0 {
+		return fmt.Errorf("%d packages failed to import", len(res.Failed))
+	}
+	return nil
+}
+
+// adminImportBundle imports a packyard-bundle/1 bundle (directory or
+// .tar.gz) into the named channel. The channel must already exist; we
+// don't auto-create it because channels.yaml is the source of truth
+// for overwrite policy and an air-gap snapshot must be immutable.
+func adminImportBundle(cfg *config.ServerConfig, args []string) error {
+	fs := flag.NewFlagSet("admin import bundle", flag.ContinueOnError)
+	channel := fs.String("channel", "", "target packyard channel (required, must exist with immutable policy)")
+	if err := fs.Parse(reorderFlagsFirst(args)); err != nil {
+		return err
+	}
+	if *channel == "" {
+		return adminUsageError("admin import bundle: -channel is required")
+	}
+	if fs.NArg() != 1 {
+		return adminUsageError("admin import bundle: expected exactly one <path-or-targz> argument")
+	}
+	path := fs.Arg(0)
+
+	deps, cleanup, err := openAdminDeps(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	imp := importers.NewBundleImporter(deps, *channel)
+	res, err := imp.Run(context.Background(), path, func(line string) {
+		fmt.Println(line)
+	})
+	if err != nil {
+		return fmt.Errorf("bundle import: %w", err)
+	}
+
+	fmt.Printf("imported=%d skipped=%d failed=%d",
+		len(res.Imported), len(res.Skipped), len(res.Failed))
+	if res.Manifest != nil {
+		fmt.Printf(" snapshot=%s", res.Manifest.SnapshotID)
+	}
+	fmt.Println()
 	for _, f := range res.Failed {
 		fmt.Fprintf(os.Stderr, "  fail %s@%s: %v\n", f.Package, f.Version, f.Err)
 	}
@@ -660,8 +710,9 @@ const adminUsageText = `usage:
   packyard-server admin [-data DIR] [-config PATH] <verb> [args…]
 
 verbs:
-  import drat <repo-url> -channel <name>
-  import git  <repo-url> [-branch <b>] -channel <name>
+  import drat   <repo-url>      -channel <name>
+  import git    <repo-url>      [-branch <b>] -channel <name>
+  import bundle <path-or-targz> -channel <name>
   channels list
   cells list
   cells show <cell-name>
