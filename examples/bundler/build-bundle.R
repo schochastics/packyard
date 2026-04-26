@@ -4,22 +4,35 @@
 # air-gap import. See design.md §10 and docs/airgap.md.
 #
 # Usage:
-#   # Subset mode: declared packages plus their transitive deps.
+#   # Subset source bundle (default): declared packages + transitive deps.
 #   Rscript build-bundle.R \
 #     --packages packages.txt \
 #     --r-version 4.4 \
 #     --snapshot cran-r4.4-2026q1 \
 #     --out bundle/
 #
-#   # Full mode: all of CRAN's src/contrib/ for the given R minor.
+#   # Full source bundle: all of CRAN's src/contrib/ for the given R minor.
 #   Rscript build-bundle.R \
 #     --full \
 #     --r-version 4.4 \
 #     --snapshot cran-r4.4-full-2026q1 \
 #     --out bundle/
 #
+#   # Binary bundle for a specific cell (e.g. RHEL 9 amd64, R 4.4).
+#   # Run after the matching source bundle is already on the channel.
+#   # Pull binaries from Posit Public Package Manager — works from any
+#   # build host (Mac, Linux, Windows) because P3M's __linux__/<distro>
+#   # URLs serve precompiled tarballs without UA sniffing.
+#   Rscript build-bundle.R \
+#     --packages packages.txt \
+#     --r-version 4.4 \
+#     --snapshot cran-r4.4-2026q1 \
+#     --binary-cell rhel9-amd64-r-4.4 \
+#     --binary-repo https://packagemanager.posit.co/cran/__linux__/rhel9/2026-04-01 \
+#     --out bundle-bin/
+#
 # Output is a CRAN-shaped directory at <out>/ containing
-# src/contrib/PACKAGES + tarballs + manifest.json. Tar it and carry
+# {src,bin}/contrib/PACKAGES + tarballs + manifest.json. Tar it and carry
 # it to the air-gap site, then run on the disconnected packyard:
 #
 #   packyard-server admin import bundle <bundle.tar.gz> --channel <snapshot>
@@ -47,6 +60,8 @@ parse_args <- function(argv) {
     snapshot      = NULL,
     out           = NULL,
     repos         = "https://cloud.r-project.org",
+    binary_cell   = NULL,
+    binary_repo   = NULL,
     deps          = c("Imports", "Depends", "LinkingTo")
   )
   i <- 1
@@ -63,6 +78,8 @@ parse_args <- function(argv) {
       "--snapshot"     = { out$snapshot <- val(); i <- i + 2 },
       "--out"          = { out$out <- val(); i <- i + 2 },
       "--repos"        = { out$repos <- val(); i <- i + 2 },
+      "--binary-cell"  = { out$binary_cell <- val(); i <- i + 2 },
+      "--binary-repo"  = { out$binary_repo <- val(); i <- i + 2 },
       "--with-suggests"= { out$deps <- c(out$deps, "Suggests"); i <- i + 1 },
       "-h"             = { print_help(); quit(save = "no", status = 0) },
       "--help"         = { print_help(); quit(save = "no", status = 0) },
@@ -75,11 +92,27 @@ parse_args <- function(argv) {
   if (!out$full && is.null(out$packages_file)) {
     stop("either --packages <file> or --full is required", call. = FALSE)
   }
+  # Binary mode is mutually exclusive with --full and requires both
+  # --binary-cell and --binary-repo. Subset is the only sensible binary
+  # shape: closed list of packages + their deps for one cell.
+  if (!is.null(out$binary_cell) || !is.null(out$binary_repo)) {
+    if (is.null(out$binary_cell) || is.null(out$binary_repo)) {
+      stop("--binary-cell and --binary-repo must be set together", call. = FALSE)
+    }
+    if (out$full) {
+      stop("--full is not supported in binary mode; use --packages with a closed list", call. = FALSE)
+    }
+  }
   out
 }
 
 print_help <- function() {
-  cat("Usage: build-bundle.R [--packages FILE | --full] --r-version X.Y --snapshot ID --out DIR [--repos URL] [--with-suggests]\n")
+  cat("Usage: build-bundle.R [--packages FILE | --full] --r-version X.Y --snapshot ID --out DIR\n")
+  cat("                      [--repos URL] [--with-suggests]\n")
+  cat("                      [--binary-cell NAME --binary-repo P3M_URL]\n")
+  cat("\n")
+  cat("Source mode (default):    bundles source tarballs from --repos.\n")
+  cat("Binary mode (binary-*):   bundles precompiled tarballs for one cell.\n")
 }
 
 # --- inputs --------------------------------------------------------------
@@ -129,38 +162,145 @@ build_full <- function(args) {
   pkgs
 }
 
+# Binary mode: resolve the closure against the P3M-style binary repo,
+# then download each precompiled tarball directly into
+# bin/linux/<cell>/<pkg>_<ver>.tar.gz so the bundle layout matches
+# packyard's URL surface.
+#
+# We bypass miniCRAN::makeRepo() for the binary case because makeRepo
+# always writes to src/contrib/, and putting binaries there would
+# misrepresent the layout to anyone serving the bundle as a static
+# CRAN. Reusing miniCRAN::pkgDep keeps the dep resolver intact —
+# P3M's distro URL exposes a CRAN-shape src/contrib/PACKAGES that
+# pkgDep walks correctly.
+build_binary <- function(args) {
+  pkgs <- read_packages(args$packages_file)
+  message(sprintf("[bundler] resolving binary deps for %d packages against %s ...",
+                  length(pkgs), args$binary_repo))
+  closure <- pkgDep(pkgs,
+    repos    = args$binary_repo,
+    type     = "source",
+    suggests = "Suggests" %in% args$deps,
+    Rversion = args$r_version)
+  message(sprintf("[bundler] dependency closure: %d packages", length(closure)))
+
+  # Resolve concrete versions from the upstream PACKAGES index.
+  available <- available.packages(
+    repos   = contrib.url(args$binary_repo, type = "source"),
+    type    = "source",
+    filters = "duplicates"
+  )
+  missing <- setdiff(closure, rownames(available))
+  if (length(missing) > 0) {
+    stop(sprintf("[bundler] %d packages in the closure are not available at %s: %s",
+                 length(missing), args$binary_repo,
+                 paste(head(missing, 10), collapse = ", ")), call. = FALSE)
+  }
+
+  cell_dir <- file.path(args$out, "bin", "linux", args$binary_cell)
+  dir.create(cell_dir, showWarnings = FALSE, recursive = TRUE)
+
+  contrib_url <- contrib.url(args$binary_repo, type = "source")
+  for (p in closure) {
+    ver <- available[p, "Version"]
+    fn  <- sprintf("%s_%s.tar.gz", p, ver)
+    src <- paste0(contrib_url, "/", fn)
+    dst <- file.path(cell_dir, fn)
+    message(sprintf("[bundler] %s %s ...", p, ver))
+    if (utils::download.file(src, destfile = dst, mode = "wb", quiet = TRUE) != 0L) {
+      stop(sprintf("[bundler] download failed: %s", src), call. = FALSE)
+    }
+  }
+
+  # Regenerate a PACKAGES index next to the tarballs so the bundle is
+  # also a working "tarball CRAN" served behind a static web server.
+  # type="source" matches the upstream P3M layout: Linux binaries are
+  # packaged as source-shape tarballs that R installs without compiling.
+  tools::write_PACKAGES(cell_dir, type = "source")
+
+  closure
+}
+
 write_manifest <- function(args, included) {
+  if (is_binary_mode(args)) {
+    write_manifest_binary(args, included)
+  } else {
+    write_manifest_source(args, included)
+  }
+}
+
+is_binary_mode <- function(args) !is.null(args$binary_cell)
+
+# write_manifest_source produces a packyard-bundle/2 source manifest.
+# Per-package entries carry a `source` blob; no `binaries[]`.
+write_manifest_source <- function(args, included) {
   contrib <- file.path(args$out, "src", "contrib")
   tarballs <- list.files(contrib, pattern = "\\.tar\\.gz$", full.names = TRUE)
 
-  hash_one <- function(p) {
+  rows <- lapply(tarballs, function(p) {
     list(
       name    = sub("_.*$", "", basename(p)),
       version = sub("^[^_]+_(.+)\\.tar\\.gz$", "\\1", basename(p)),
-      path    = file.path("src", "contrib", basename(p)),
-      sha256  = unname(tools::md5sum(p)),  # placeholder; overridden below
-      size    = file.info(p)$size
+      source  = list(
+        path   = file.path("src", "contrib", basename(p)),
+        sha256 = compute_sha256(p),
+        size   = file.info(p)$size
+      )
     )
-  }
-  rows <- lapply(tarballs, hash_one)
-  # Recompute with sha256 (tools::md5sum is what's stdlib; for sha256
-  # we need a separate call). digest is in base 4.5+; on 4.4 fallback
-  # to a manual call to openssl::sha256 if available, or read+digest.
-  for (i in seq_along(rows)) {
-    rows[[i]]$sha256 <- compute_sha256(tarballs[[i]])
-  }
+  })
 
   manifest <- list(
-    schema       = "packyard-bundle/1",
+    schema       = "packyard-bundle/2",
     snapshot_id  = args$snapshot,
     r_version    = args$r_version,
     source_url   = args$repos,
     mode         = if (args$full) "full" else "subset",
+    kind         = "source",
     created_at   = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
     tool         = sprintf("examples/bundler/build-bundle.R (miniCRAN %s, R %s)",
                            packageVersion("miniCRAN"),
                            paste(R.version$major, R.version$minor, sep = ".")),
     input_packages = if (args$full) NULL else read_packages(args$packages_file),
+    packages     = rows
+  )
+
+  json <- to_json(manifest)
+  writeLines(json, file.path(args$out, "manifest.json"))
+}
+
+# write_manifest_binary produces a packyard-bundle/2 binary manifest.
+# Per-package entries carry a `binaries[]` list with the single cell
+# (this script always emits one cell per bundle).
+write_manifest_binary <- function(args, included) {
+  cell_dir <- file.path(args$out, "bin", "linux", args$binary_cell)
+  tarballs <- list.files(cell_dir, pattern = "\\.tar\\.gz$", full.names = TRUE)
+
+  rows <- lapply(tarballs, function(p) {
+    list(
+      name    = sub("_.*$", "", basename(p)),
+      version = sub("^[^_]+_(.+)\\.tar\\.gz$", "\\1", basename(p)),
+      binaries = list(list(
+        cell   = args$binary_cell,
+        path   = file.path("bin", "linux", args$binary_cell, basename(p)),
+        sha256 = compute_sha256(p),
+        size   = file.info(p)$size
+      ))
+    )
+  })
+
+  manifest <- list(
+    schema       = "packyard-bundle/2",
+    snapshot_id  = args$snapshot,
+    r_version    = args$r_version,
+    source_url   = args$binary_repo,
+    mode         = "subset",
+    kind         = "binary",
+    cell         = args$binary_cell,
+    created_at   = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+    tool         = sprintf("examples/bundler/build-bundle.R (miniCRAN %s, R %s)",
+                           packageVersion("miniCRAN"),
+                           paste(R.version$major, R.version$minor, sep = ".")),
+    input_packages = read_packages(args$packages_file),
     packages     = rows
   )
 
@@ -220,7 +360,13 @@ main <- function() {
   args <- parse_args(commandArgs(trailingOnly = TRUE))
   dir.create(args$out, showWarnings = FALSE, recursive = TRUE)
 
-  included <- if (args$full) build_full(args) else build_subset(args)
+  included <- if (is_binary_mode(args)) {
+    build_binary(args)
+  } else if (args$full) {
+    build_full(args)
+  } else {
+    build_subset(args)
+  }
 
   write_manifest(args, included)
 

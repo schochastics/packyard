@@ -7,20 +7,22 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/schochastics/packyard/internal/api"
 	"github.com/schochastics/packyard/internal/config"
 	"github.com/schochastics/packyard/internal/importers"
 )
 
-// buildTestBundle writes a CRAN-shaped directory under root and
-// returns the manifest. pkgs maps "<name>_<version>.tar.gz" to the
-// raw tarball bytes so each test can dictate the on-disk content.
+// buildTestBundle writes a v2 source-shaped CRAN bundle under root and
+// returns the in-memory manifest. pkgs maps "<name>_<version>.tar.gz"
+// to the raw tarball bytes so each test can dictate the on-disk
+// content.
 func buildTestBundle(t *testing.T, root string, pkgs map[string]string) *importers.BundleManifest {
 	t.Helper()
 	contrib := filepath.Join(root, "src", "contrib")
@@ -29,11 +31,12 @@ func buildTestBundle(t *testing.T, root string, pkgs map[string]string) *importe
 	}
 
 	m := &importers.BundleManifest{
-		Schema:     importers.BundleSchema,
+		Schema:     importers.BundleSchemaV2,
 		SnapshotID: "test-snapshot",
 		RVersion:   "4.4",
 		SourceURL:  "https://cloud.r-project.org",
 		Mode:       "subset",
+		Kind:       importers.BundleKindSource,
 		CreatedAt:  "2026-04-25T08:00:00Z",
 		Tool:       "test",
 	}
@@ -48,9 +51,11 @@ func buildTestBundle(t *testing.T, root string, pkgs map[string]string) *importe
 		m.Packages = append(m.Packages, importers.BundleManifestPackage{
 			Name:    name,
 			Version: version,
-			Path:    "src/contrib/" + filename,
-			Sha256:  hex.EncodeToString(sum[:]),
-			Size:    int64(len(body)),
+			Source: &importers.BundleManifestBlob{
+				Path:   "src/contrib/" + filename,
+				Sha256: hex.EncodeToString(sum[:]),
+				Size:   int64(len(body)),
+			},
 		})
 	}
 
@@ -62,6 +67,138 @@ func buildTestBundle(t *testing.T, root string, pkgs map[string]string) *importe
 		t.Fatalf("write manifest: %v", err)
 	}
 	return m
+}
+
+// buildTestBundleV1Raw writes a legacy packyard-bundle/1 manifest by
+// hand. Used to keep regression coverage that v1 archives still
+// import unchanged after the schema bump.
+func buildTestBundleV1Raw(t *testing.T, root string, pkgs map[string]string) {
+	t.Helper()
+	contrib := filepath.Join(root, "src", "contrib")
+	if err := os.MkdirAll(contrib, 0o755); err != nil {
+		t.Fatalf("mkdir contrib: %v", err)
+	}
+
+	type v1Pkg struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+		Path    string `json:"path"`
+		Sha256  string `json:"sha256"`
+		Size    int64  `json:"size"`
+	}
+	type v1Manifest struct {
+		Schema     string  `json:"schema"`
+		SnapshotID string  `json:"snapshot_id"`
+		RVersion   string  `json:"r_version"`
+		Mode       string  `json:"mode"`
+		CreatedAt  string  `json:"created_at"`
+		Tool       string  `json:"tool"`
+		Packages   []v1Pkg `json:"packages"`
+	}
+
+	m := v1Manifest{
+		Schema:     importers.BundleSchemaV1,
+		SnapshotID: "test-snapshot-v1",
+		RVersion:   "4.4",
+		Mode:       "subset",
+		CreatedAt:  "2026-04-25T08:00:00Z",
+		Tool:       "test",
+	}
+	for filename, body := range pkgs {
+		full := filepath.Join(contrib, filename)
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", filename, err)
+		}
+		name, version := splitDratFilename(filename)
+		sum := sha256.Sum256([]byte(body))
+		m.Packages = append(m.Packages, v1Pkg{
+			Name:    name,
+			Version: version,
+			Path:    "src/contrib/" + filename,
+			Sha256:  hex.EncodeToString(sum[:]),
+			Size:    int64(len(body)),
+		})
+	}
+
+	manBytes, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal v1 manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), manBytes, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+}
+
+// buildTestBinaryBundle writes a v2 binary-shaped bundle under root.
+// pkgs maps "<name>_<version>.tar.gz" → raw bytes; tarballs land at
+// bin/linux/<cell>/<filename> matching the bundler's output layout.
+func buildTestBinaryBundle(t *testing.T, root, cell string, pkgs map[string]string) *importers.BundleManifest {
+	t.Helper()
+	cellDir := filepath.Join(root, "bin", "linux", cell)
+	if err := os.MkdirAll(cellDir, 0o755); err != nil {
+		t.Fatalf("mkdir cellDir: %v", err)
+	}
+
+	m := &importers.BundleManifest{
+		Schema:     importers.BundleSchemaV2,
+		SnapshotID: "test-snapshot-bin",
+		RVersion:   "4.4",
+		SourceURL:  "https://packagemanager.posit.co/cran/__linux__/rhel9/2026-04-01",
+		Mode:       "subset",
+		Kind:       importers.BundleKindBinary,
+		Cell:       cell,
+		CreatedAt:  "2026-04-25T08:00:00Z",
+		Tool:       "test",
+	}
+
+	for filename, body := range pkgs {
+		full := filepath.Join(cellDir, filename)
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", filename, err)
+		}
+		name, version := splitDratFilename(filename)
+		sum := sha256.Sum256([]byte(body))
+		m.Packages = append(m.Packages, importers.BundleManifestPackage{
+			Name:    name,
+			Version: version,
+			Binaries: []importers.BundleManifestBinary{
+				{
+					Cell: cell,
+					BundleManifestBlob: importers.BundleManifestBlob{
+						Path:   "bin/linux/" + cell + "/" + filename,
+						Sha256: hex.EncodeToString(sum[:]),
+						Size:   int64(len(body)),
+					},
+				},
+			},
+		})
+	}
+
+	manBytes, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.json"), manBytes, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	return m
+}
+
+// withMatrix returns deps with a matrix containing the named cell so
+// binary bundle imports validate. Reused across binary-mode tests.
+func withMatrix(deps api.Deps, cell string) api.Deps {
+	deps.Matrix = &config.MatrixConfig{
+		Cells: []config.Cell{
+			{
+				Name:      cell,
+				OS:        "linux",
+				OSVersion: "rhel9",
+				Arch:      "amd64",
+				RMinor:    "4.4",
+			},
+		},
+	}
+	return deps
 }
 
 // tarGzDir packs srcDir into a .tar.gz at archivePath.
@@ -183,8 +320,6 @@ func TestBundlePreflightRejectsSha256Mismatch(t *testing.T) {
 		t.Errorf("error = %v; want sha256 mismatch", err)
 	}
 
-	// Pre-flight aborts before any side effects: no packages should
-	// have landed.
 	var n int
 	if err := deps.DB.QueryRowContext(context.Background(),
 		`SELECT COUNT(*) FROM packages`).Scan(&n); err != nil {
@@ -199,12 +334,11 @@ func TestBundleRejectsBadSchema(t *testing.T) {
 	root := t.TempDir()
 	buildTestBundle(t, root, map[string]string{"foo_1.0.0.tar.gz": "x"})
 
-	// Hand-edit the schema field.
 	body, err := os.ReadFile(filepath.Join(root, "manifest.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	bad := strings.Replace(string(body), `"packyard-bundle/1"`, `"packyard-bundle/9999"`, 1)
+	bad := strings.Replace(string(body), `"packyard-bundle/2"`, `"packyard-bundle/9999"`, 1)
 	if err := os.WriteFile(filepath.Join(root, "manifest.json"), []byte(bad), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -252,18 +386,20 @@ func TestBundleRejectsPathTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Hand-craft a manifest with a path-escape attempt.
 	manifest := importers.BundleManifest{
-		Schema:     importers.BundleSchema,
+		Schema:     importers.BundleSchemaV2,
 		SnapshotID: "evil",
 		Mode:       "subset",
+		Kind:       importers.BundleKindSource,
 		Packages: []importers.BundleManifestPackage{
 			{
 				Name:    "evil",
 				Version: "1.0.0",
-				Path:    "../../../../etc/shadow",
-				Sha256:  hex.EncodeToString(sha256.New().Sum(nil)),
-				Size:    0,
+				Source: &importers.BundleManifestBlob{
+					Path:   "../../../../etc/shadow",
+					Sha256: hex.EncodeToString(sha256.New().Sum(nil)),
+					Size:   0,
+				},
 			},
 		},
 	}
@@ -311,7 +447,172 @@ func TestBundleProgressFires(t *testing.T) {
 	}
 }
 
-// minimal helper used above when constructing manifest entries —
-// re-uses splitDratFilename from drat_test.go but lives in the same
-// package, so no import needed.
-var _ = fmt.Sprintf // keep fmt import in case future tests need it
+// TestBundleV1ManifestStillImports is the regression test that proves
+// pre-existing packyard-bundle/1 archives don't break after the v2
+// schema bump.
+func TestBundleV1ManifestStillImports(t *testing.T) {
+	root := t.TempDir()
+	buildTestBundleV1Raw(t, root, map[string]string{
+		"foo_1.0.0.tar.gz": "foo-bytes",
+	})
+
+	deps := newImportDeps(t, "cran-test", config.PolicyImmutable)
+	imp := importers.NewBundleImporter(deps, "cran-test")
+
+	res, err := imp.Run(context.Background(), root, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Imported) != 1 {
+		t.Errorf("Imported = %v; want 1", res.Imported)
+	}
+	if res.Manifest.Kind != importers.BundleKindSource {
+		t.Errorf("v1 manifest should normalise to Kind=source; got %q", res.Manifest.Kind)
+	}
+	if res.Manifest.Schema != importers.BundleSchemaV1 {
+		t.Errorf("schema should be preserved as v1; got %q", res.Manifest.Schema)
+	}
+}
+
+// TestBundleBinaryRoundTrip is the happy path for the new flow:
+// import a source bundle to seed packages rows, then import a binary
+// bundle on the same channel and confirm binaries land.
+func TestBundleBinaryRoundTrip(t *testing.T) {
+	const cell = "rhel9-amd64-r-4.4"
+
+	srcRoot := t.TempDir()
+	buildTestBundle(t, srcRoot, map[string]string{
+		"foo_1.0.0.tar.gz": "foo-source-bytes",
+		"bar_2.1.0.tar.gz": "bar-source-bytes",
+	})
+	binRoot := t.TempDir()
+	buildTestBinaryBundle(t, binRoot, cell, map[string]string{
+		"foo_1.0.0.tar.gz": "foo-rhel9-binary-bytes",
+		"bar_2.1.0.tar.gz": "bar-rhel9-binary-bytes",
+	})
+
+	deps := withMatrix(newImportDeps(t, "cran-r4.4-2026q2", config.PolicyImmutable), cell)
+	imp := importers.NewBundleImporter(deps, "cran-r4.4-2026q2")
+
+	if res, err := imp.Run(context.Background(), srcRoot, nil); err != nil {
+		t.Fatalf("source Run: %v", err)
+	} else if len(res.Imported) != 2 || len(res.Failed) != 0 {
+		t.Fatalf("source import: imported=%v failed=%v", res.Imported, res.Failed)
+	}
+
+	res, err := imp.Run(context.Background(), binRoot, nil)
+	if err != nil {
+		t.Fatalf("binary Run: %v", err)
+	}
+	if len(res.Imported) != 2 {
+		t.Errorf("binary Imported = %v; want 2", res.Imported)
+	}
+	if len(res.Failed) != 0 {
+		t.Errorf("binary Failed = %v; want none", res.Failed)
+	}
+
+	var n int
+	if err := deps.DB.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM binaries WHERE cell = ?`, cell).Scan(&n); err != nil {
+		t.Fatalf("count binaries: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("binaries rows for %s = %d; want 2", cell, n)
+	}
+}
+
+// TestBundleBinaryFailsWithoutSource confirms binary bundles surface
+// ErrSourceRowMissing per package when the matching source bundle
+// hasn't been imported yet, without aborting the whole run.
+func TestBundleBinaryFailsWithoutSource(t *testing.T) {
+	const cell = "rhel9-amd64-r-4.4"
+
+	binRoot := t.TempDir()
+	buildTestBinaryBundle(t, binRoot, cell, map[string]string{
+		"foo_1.0.0.tar.gz": "foo-rhel9-binary-bytes",
+		"bar_2.1.0.tar.gz": "bar-rhel9-binary-bytes",
+	})
+
+	deps := withMatrix(newImportDeps(t, "cran-r4.4-2026q2", config.PolicyImmutable), cell)
+	imp := importers.NewBundleImporter(deps, "cran-r4.4-2026q2")
+
+	res, err := imp.Run(context.Background(), binRoot, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Imported) != 0 {
+		t.Errorf("Imported = %v; want none", res.Imported)
+	}
+	if len(res.Failed) != 2 {
+		t.Fatalf("Failed = %v; want 2", res.Failed)
+	}
+	for _, f := range res.Failed {
+		if !errors.Is(f.Err, api.ErrSourceRowMissing) {
+			t.Errorf("failure %s@%s: want ErrSourceRowMissing; got %v", f.Package, f.Version, f.Err)
+		}
+	}
+}
+
+// TestBundleBinaryRejectsUnknownCell aborts before pre-flight if the
+// bundle's cell isn't in matrix.yaml.
+func TestBundleBinaryRejectsUnknownCell(t *testing.T) {
+	const cell = "rhel9-amd64-r-4.4"
+
+	binRoot := t.TempDir()
+	buildTestBinaryBundle(t, binRoot, cell, map[string]string{
+		"foo_1.0.0.tar.gz": "x",
+	})
+
+	// Matrix declares a different cell; the bundle's cell is unknown.
+	deps := withMatrix(newImportDeps(t, "cran-test", config.PolicyImmutable), "ubuntu-24.04-amd64-r-4.4")
+	imp := importers.NewBundleImporter(deps, "cran-test")
+
+	_, err := imp.Run(context.Background(), binRoot, nil)
+	if err == nil {
+		t.Fatal("expected unknown-cell rejection")
+	}
+	if !strings.Contains(err.Error(), "not declared in matrix.yaml") {
+		t.Errorf("error = %v; want matrix rejection", err)
+	}
+}
+
+// TestBundleBinaryPreflightMismatch checks that a tampered binary
+// tarball aborts the whole import before any binaries land.
+func TestBundleBinaryPreflightMismatch(t *testing.T) {
+	const cell = "rhel9-amd64-r-4.4"
+
+	srcRoot := t.TempDir()
+	buildTestBundle(t, srcRoot, map[string]string{
+		"foo_1.0.0.tar.gz": "foo-source-bytes",
+	})
+	binRoot := t.TempDir()
+	buildTestBinaryBundle(t, binRoot, cell, map[string]string{
+		"foo_1.0.0.tar.gz": "foo-rhel9-binary-bytes",
+	})
+
+	if err := os.WriteFile(filepath.Join(binRoot, "bin/linux", cell, "foo_1.0.0.tar.gz"),
+		[]byte("tampered"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := withMatrix(newImportDeps(t, "cran-test", config.PolicyImmutable), cell)
+	imp := importers.NewBundleImporter(deps, "cran-test")
+
+	if _, err := imp.Run(context.Background(), srcRoot, nil); err != nil {
+		t.Fatalf("source Run: %v", err)
+	}
+	if _, err := imp.Run(context.Background(), binRoot, nil); err == nil {
+		t.Fatal("expected sha256 mismatch on binary preflight")
+	} else if !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Errorf("error = %v; want sha256 mismatch", err)
+	}
+
+	var n int
+	if err := deps.DB.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM binaries`).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 binary rows after aborted import; got %d", n)
+	}
+}

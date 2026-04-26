@@ -133,7 +133,7 @@ packyard-server admin import bundle ./cran-r4.4-2026q1.tar.gz \
 What happens:
 
 - The bundle's `manifest.json` is validated (schema must be
-  `packyard-bundle/1`).
+  `packyard-bundle/1` or `packyard-bundle/2`).
 - **Pre-flight:** every tarball is sha256-verified against the
   manifest. Any mismatch aborts before any side effects — neither
   CAS nor DB is touched.
@@ -210,20 +210,101 @@ a valid `manifest.json` works. See
 the manifest schema.
 
 **"How do I include compiled binaries, not just sources?"**
-Source-only is the v1.x baseline. Binary inclusion is on the
-roadmap; until then, the air-gap site needs compilers (gcc,
-gfortran, headers) to install packages with C/C++/Fortran code.
-For most regulated-org sites that's already true — they need
-compilers for their internal packages anyway.
+Build a separate **binary bundle** for each cell you need and
+import it on top of the matching source bundle. See
+[Pre-built binaries via Posit Public Package Manager](#pre-built-binaries-via-posit-public-package-manager)
+below. The source bundle remains the baseline — the importer
+attaches binaries onto existing `(channel, name, version)` rows.
+
+## Pre-built binaries via Posit Public Package Manager
+
+CRAN doesn't publish Linux binaries; the canonical source for
+distro-specific precompiled tarballs is Posit Public Package
+Manager (P3M). Packyard's bundle format treats binaries as a
+second, optional bundle layered on top of a source bundle.
+
+### When to use this
+
+Skip this section if your air-gap site has a build toolchain
+(`gcc`, `gfortran`, `R-devel`) and is happy compiling at install
+time — that's the `R CMD INSTALL`-from-source path, and it works
+on any distro. Use binary bundles when the air-gap host can't or
+shouldn't compile, or when install-time compilation is too slow
+for your operators.
+
+### Build a binary bundle
+
+```sh
+# Run from any host (Mac, Linux, Windows) — P3M's Linux URLs serve
+# precompiled tarballs based on the URL path, not on the requesting
+# client's OS. So building RHEL 9 binaries on a Mac is fine.
+Rscript build-bundle.R \
+  --packages    packages.txt \
+  --r-version   4.4 \
+  --snapshot    cran-r4.4-2026q1 \
+  --binary-cell rhel9-amd64-r-4.4 \
+  --binary-repo https://packagemanager.posit.co/cran/__linux__/rhel9/2026-04-01 \
+  --out         ./bundle-bin/
+
+tar -C bundle-bin -czf cran-r4.4-2026q1-rhel9.tar.gz .
+```
+
+`--binary-cell` is the cell name as declared in `matrix.yaml` on
+the air-gap server. The bundler does not validate this on the
+build side — typos surface at import time as
+`cell %q is not declared in matrix.yaml`.
+
+### Add the cell to `matrix.yaml`
+
+Before importing, declare the cell on the air-gap server:
+
+```yaml
+# matrix.yaml
+cells:
+  - name: rhel9-amd64-r-4.4
+    os: linux
+    os_version: rhel9
+    arch: amd64
+    r_minor: "4.4"
+```
+
+Restart the server so the matrix is reloaded.
+
+### Import in order: source first, then binaries
+
+```sh
+# Step 1: source bundle. Creates the packages rows.
+packyard-server admin import bundle ./cran-r4.4-2026q1.tar.gz \
+  -channel cran-r4.4-2026q1
+
+# Step 2: binary bundle. Attaches binaries to the existing rows.
+packyard-server admin import bundle ./cran-r4.4-2026q1-rhel9.tar.gz \
+  -channel cran-r4.4-2026q1
+```
+
+If you import the binary bundle first (or for a package that's
+not in the source bundle), every binary entry in `manifest.packages`
+lands in `failed=` with `source row not found; import the source
+bundle first`. Re-running the binary import after the source import
+is idempotent — already-present binaries are reported as `skipped=`.
+
+### Multiple cells
+
+One bundle = one cell. To support a second cell, run the bundler
+again with a different `--binary-cell` / `--binary-repo` and
+import the resulting archive. Cells are independent: the read
+surface serves whichever cells the operator has populated, falling
+back to source for clients on cells that aren't built.
 
 ## Status
 
 | Component | Status |
 |---|---|
-| Bundle format spec | Frozen — schema `packyard-bundle/1` |
+| Bundle format spec | `packyard-bundle/2` (current); `packyard-bundle/1` accepted on read |
 | Bundler script | Shipped in [`examples/bundler/`](../examples/bundler/) |
 | Air-gap operator playbook | This doc |
 | `admin import bundle` CLI | Shipped — see [admin.md](admin.md#admin-import-bundle-path-or-targz--channel-name) |
+| Binary bundle support | Shipped — one cell per bundle, P3M as the binary source |
 | Bundle-level signing enforcement | Deferred; manifest sha256 mandatory, ed25519 optional |
 | Bioconductor support | Deferred; same format applies |
 | Diff bundles | Deferred; full bundles + CAS dedup is enough at v1.x scale |

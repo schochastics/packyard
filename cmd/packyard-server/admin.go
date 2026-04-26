@@ -586,7 +586,10 @@ func adminImportBundle(cfg *config.ServerConfig, args []string) error {
 	fmt.Printf("imported=%d skipped=%d failed=%d",
 		len(res.Imported), len(res.Skipped), len(res.Failed))
 	if res.Manifest != nil {
-		fmt.Printf(" snapshot=%s", res.Manifest.SnapshotID)
+		fmt.Printf(" snapshot=%s kind=%s", res.Manifest.SnapshotID, res.Manifest.Kind)
+		if res.Manifest.Cell != "" {
+			fmt.Printf(" cell=%s", res.Manifest.Cell)
+		}
 	}
 	fmt.Println()
 	for _, f := range res.Failed {

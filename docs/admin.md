@@ -95,7 +95,7 @@ Temp clone and build dirs are cleaned up on exit.
 
 ### `admin import bundle <path-or-targz> -channel <name>`
 
-Imports a `packyard-bundle/1` bundle (the format produced by
+Imports a `packyard-bundle/{1,2}` bundle (the format produced by
 [`examples/bundler/build-bundle.R`](../examples/bundler/build-bundle.R))
 into the named channel. The path argument may be a directory laid out
 as documented in [design.md §10](../design.md) or a `.tar.gz` / `.tgz`
@@ -112,21 +112,39 @@ The target channel must already exist in `channels.yaml` with
 because `channels.yaml` is the source of truth for channel policy and
 an air-gap snapshot must not be silently mutable.
 
+The output line annotates the bundle's `kind` (and `cell` for binary
+bundles) so the operator can tell at a glance which run-mode it was:
+
+```
+imported=42 skipped=0 failed=0 snapshot=cran-r4.4-2026q1 kind=source
+imported=42 skipped=0 failed=0 snapshot=cran-r4.4-2026q1 kind=binary cell=rhel9-amd64-r-4.4
+```
+
 What happens, in order:
 
-1. **Manifest validation.** Schema must be `packyard-bundle/1`;
-   unknown schemas are rejected at the gate.
-2. **Pre-flight sha256 verification.** Every tarball is hashed and
-   compared to its manifest entry. **Any mismatch aborts before any
-   side effects** — neither CAS nor the DB is touched. This matches
-   the spec: partial imports are not allowed.
-3. **Per-package import.** Each tarball is published in-process via
-   the same path CI publishes use, so CAS dedup, idempotent re-import,
-   and immutable-policy enforcement all work the same way.
+1. **Manifest validation.** Schema must be `packyard-bundle/1` or
+   `packyard-bundle/2`; unknown schemas are rejected at the gate. v1
+   manifests are normalised to v2's shape internally.
+2. **Cell validation (binary bundles only).** The bundle's top-level
+   `cell` must match a cell in `matrix.yaml`; if not, the import aborts
+   before pre-flight.
+3. **Pre-flight sha256 verification.** Every blob (source or binary)
+   is hashed and compared to its manifest entry. **Any mismatch aborts
+   before any side effects** — neither CAS nor the DB is touched.
+4. **Per-package import.** Source bundles publish each tarball through
+   the same path CI uses — CAS dedup, idempotent re-import, and
+   immutable-policy enforcement all work the same way. Binary bundles
+   attach binaries to the existing `(channel, name, version)` row;
+   missing source rows surface as `failed=` with `source row not
+   found; import the source bundle first` and don't block other
+   packages.
 
 Re-running the same bundle is cheap and idempotent: matching content
 already in CAS counts as `skipped`, mismatched content on an immutable
 channel surfaces as a per-package failure.
+
+For the binary-bundle workflow (source first, then binaries-per-cell),
+see [airgap.md §Pre-built binaries](airgap.md#pre-built-binaries-via-posit-public-package-manager).
 
 ### `admin channels list`
 

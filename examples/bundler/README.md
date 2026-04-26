@@ -58,17 +58,65 @@ Rscript build-bundle.R \
 Expect tens of GB of source downloads and ~30+ minutes runtime.
 For most teams, subset mode is the right answer.
 
+## Binary mode — pre-built tarballs from P3M
+
+When the air-gap host can't (or shouldn't) compile from source, build
+a separate **binary bundle** for one cell at a time. The bundle is
+imported on top of a matching source bundle — packyard merges the
+binaries into the existing `(channel, name, version)` rows.
+
+```sh
+# Step 1: build + import the source bundle (any host, any time).
+Rscript build-bundle.R \
+  --packages   packages.txt \
+  --r-version  4.4 \
+  --snapshot   cran-r4.4-2026q2 \
+  --out        ./bundle-src/
+
+# Step 2: build the binary bundle for one cell. Run from any build
+# host (Mac, Linux, Windows) — Posit Public Package Manager's
+# __linux__/<distro>/<snapshot> URLs serve precompiled tarballs
+# regardless of the requesting client's OS.
+Rscript build-bundle.R \
+  --packages    packages.txt \
+  --r-version   4.4 \
+  --snapshot    cran-r4.4-2026q2 \
+  --binary-cell rhel9-amd64-r-4.4 \
+  --binary-repo https://packagemanager.posit.co/cran/__linux__/rhel9/2026-04-01 \
+  --out         ./bundle-bin/
+```
+
+Tar both for transport, then on the air-gap host:
+
+```sh
+packyard-server admin import bundle ./bundle-src.tar.gz --channel cran-r4.4-2026q2
+packyard-server admin import bundle ./bundle-bin.tar.gz --channel cran-r4.4-2026q2
+```
+
+**Order matters.** The binary bundle attaches binaries to existing
+package rows; if the source bundle hasn't been imported yet, every
+package in the binary bundle lands in `failed=` with
+`source row not found`. Re-run the binary import after the source
+import succeeds — the second run is idempotent.
+
+The cell name (`--binary-cell`) must match a cell declared in
+`matrix.yaml` on the air-gap server. The default matrix ships
+Ubuntu cells; add RHEL / Rocky / Alma rows yourself before
+importing. The bundler does not validate this on the build side.
+
 ## Flags
 
 | Flag | Required | Meaning |
 |---|---|---|
 | `--packages FILE` | subset mode | Plain-text input, one package name per line. `==version` suffix is parsed but currently advisory. |
-| `--full` | full mode | Snapshot every package on CRAN for the given R minor. Mutually exclusive with `--packages`. |
+| `--full` | source full mode | Snapshot every package on CRAN for the given R minor. Mutually exclusive with `--packages` and with `--binary-*`. |
 | `--r-version X.Y` | yes | R minor version the bundle targets. Affects which package versions miniCRAN will resolve to. |
 | `--snapshot ID` | yes | Bundle identity, recorded in `manifest.json`. Convention: `cran-r<minor>-<period>` e.g. `cran-r4.4-2026q1`. Used as the channel name on the import side. |
 | `--out DIR` | yes | Output directory. Created if missing. |
-| `--repos URL` | no | Upstream repo, defaults to `https://cloud.r-project.org`. Override to point at a snapshot mirror (PPM dated URL, RSPM, an internal mirror). |
+| `--repos URL` | no | Upstream source repo, defaults to `https://cloud.r-project.org`. Override to point at a snapshot mirror (PPM dated URL, RSPM, an internal mirror). |
 | `--with-suggests` | no | Also walk `Suggests:`. Roughly doubles bundle size. Off by default. |
+| `--binary-cell NAME` | binary mode | Cell to bundle for, matching a name in the air-gap server's `matrix.yaml` (e.g. `rhel9-amd64-r-4.4`). Activates binary mode; requires `--binary-repo` and `--packages`. |
+| `--binary-repo URL` | binary mode | P3M-style URL whose `src/contrib/` path serves precompiled tarballs for the cell, e.g. `https://packagemanager.posit.co/cran/__linux__/rhel9/2026-04-01`. |
 
 ## What the bundle looks like
 

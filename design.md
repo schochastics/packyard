@@ -812,26 +812,31 @@ bundle/
   manifest.json
 ```
 
-`manifest.json` is the only non-stock-CRAN file. Schema `packyard-bundle/1`:
+`manifest.json` is the only non-stock-CRAN file. Two schemas are accepted: `packyard-bundle/2` is the current shape; `packyard-bundle/1` is the legacy source-only shape, retained on the read side so older archives continue importing without rebuilds.
 
 ```json
 {
-  "schema": "packyard-bundle/1",
+  "schema": "packyard-bundle/2",
   "snapshot_id": "cran-r4.4-2026q1",
   "r_version": "4.4",
   "source_url": "https://cloud.r-project.org",
   "mode": "subset",
+  "kind": "source",
   "created_at": "2026-04-25T07:44:08Z",
   "tool": "examples/bundler/build-bundle.R (miniCRAN 0.3.2, R 4.5.2)",
   "input_packages": ["ggplot2", "dplyr", ...],
   "packages": [
     { "name": "ggplot2", "version": "3.5.1",
-      "path": "src/contrib/ggplot2_3.5.1.tar.gz",
-      "sha256": "abc123...", "size": 4123456 },
+      "source": { "path": "src/contrib/ggplot2_3.5.1.tar.gz",
+                  "sha256": "abc123...", "size": 4123456 } },
     ...
   ]
 }
 ```
+
+`kind` discriminates between source bundles (carry `src/contrib/` tarballs) and binary bundles (carry pre-built `bin/linux/<cell>/` tarballs from a binary mirror like Posit Public Package Manager). A binary bundle has `kind: "binary"`, a top-level `cell`, and per-package `binaries: [{ cell, path, sha256, size }]` instead of `source`. One bundle = one kind = (for binary bundles) one cell — operators who need binaries for multiple cells run the bundler once per cell.
+
+Bundles compose. To populate a channel with both source and binaries: import the source bundle first to create the `packages` rows, then import each binary bundle. The binary import attaches into existing `binaries` rows without touching the source — and refuses (per package) if the source row is absent, so an out-of-order import surfaces clearly in `failed=` rather than silently no-op.
 
 Decoupling the format from the producer means operators who already have rsync-of-CRAN, PPM CLI exports, or a hand-rolled pipeline can keep using them — they just need to write a `manifest.json` alongside whatever directory they produce.
 
@@ -842,12 +847,15 @@ The bundler is an R script at [`examples/bundler/build-bundle.R`](examples/bundl
 - The R-side dependency resolver already understands `Imports` / `Depends` / `LinkingTo`, version constraints in DESCRIPTION, and `Priority: base/recommended` exclusions. Reimplementing in Go is a year of edge cases that miniCRAN's maintainers track for free.
 - The connected build host needs network and R; for the regulated-org segment, that's a CI runner or a dev laptop — already available.
 
-Two modes, same script:
+Three modes, same script:
 
 | Mode | Input | Produces |
 |---|---|---|
 | Subset (`--packages packages.txt`) | one package name per line | the dependency closure of those packages, sources only |
 | Full (`--full`) | _(none)_ | every CRAN package available for the requested R minor, sources only |
+| Binary (`--binary-cell` + `--binary-repo`) | a packages list + a P3M-style URL | the dependency closure as precompiled tarballs for one cell, laid out under `bin/linux/<cell>/` |
+
+Binary mode runs from any host (including macOS or Windows): Posit Public Package Manager's `__linux__/<distro>/<snapshot>` URLs serve precompiled tarballs based on the URL path, not on the requesting client's OS or User-Agent.
 
 Operators who already produce CRAN-shaped output by other means write their own `manifest.json` and feed it to `import bundle` directly.
 
@@ -875,12 +883,12 @@ packyard-server admin import bundle ./cran-r4.4-2026q1.tar.gz \
 Behaviour:
 
 1. Create the channel with `overwrite_policy: immutable` if it doesn't exist.
-2. Verify the bundle's `manifest.json` against schema `packyard-bundle/1`.
-3. For each entry in `manifest.packages`, sha256-verify the tarball against the manifest, then write to CAS. Blobs already in CAS (from a previous snapshot) are deduplicated automatically.
-4. Insert per-package DB rows referencing the CAS blobs.
-5. Append an audit event per package imported.
+2. Verify the bundle's `manifest.json` against schema `packyard-bundle/{1,2}`.
+3. For each entry in `manifest.packages`, sha256-verify the referenced blob(s) against the manifest, then write to CAS. Blobs already in CAS (from a previous snapshot) are deduplicated automatically.
+4. For source bundles: insert per-package DB rows referencing the CAS blobs. For binary bundles: look up the existing package row by `(channel, name, version)` and attach a `binaries` row for the bundle's cell. Binary imports fail per-package with `source row not found` if the matching source bundle hasn't been imported first.
+5. Append an audit event per package imported (`publish` for source, `import_binary` for binary).
 
-Mismatched sha256 aborts the whole import — partial imports are not allowed.
+Mismatched sha256 aborts the whole import — partial imports are not allowed. Per-package failures during the import phase (e.g. missing source row for a binary entry) surface in `failed=` and don't block the rest of the bundle.
 
 ### 10.6 Update model
 

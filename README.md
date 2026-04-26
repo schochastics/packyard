@@ -143,11 +143,15 @@ The OpenAPI spec is also served at `/api/v1/openapi.json` (and
 
 - **Air-gap deploy with a bundled CRAN mirror.** The defining
   post-v1 feature and the gating requirement for regulated-org
-  targets. **Shipped end-to-end:** bundle format, the operator
-  playbook, the [`build-bundle.R`](examples/bundler/build-bundle.R)
-  bundler, and the receiving `packyard-server admin import bundle`
-  command. See [docs/airgap.md](docs/airgap.md). Bioconductor
-  support deferred to v1.y.
+  targets. **Shipped end-to-end:** bundle format (`packyard-bundle/2`,
+  with v1 still readable), the operator playbook, the
+  [`build-bundle.R`](examples/bundler/build-bundle.R) bundler in
+  source and binary modes, and the receiving
+  `packyard-server admin import bundle` command. Pre-built binaries
+  for any P3M-served Linux cell (RHEL 9, Ubuntu, etc.) ride a
+  separate binary bundle layered onto the source bundle on the same
+  channel. See [docs/airgap.md](docs/airgap.md). Bioconductor support
+  deferred to v1.y.
 - **Server-side binary build farm.** v1 receives pre-built artifacts
   from CI; v1.x adds the option to build server-side for teams that
   don't want a CI pipeline per package. Cell schema is already ready.
