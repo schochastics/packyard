@@ -24,6 +24,8 @@ type dbChannel struct {
 	name            string
 	overwritePolicy string
 	isDefault       bool
+	kind            string
+	upstreamURL     string // empty if NULL in the DB
 }
 
 // ReconcileChannels applies cfg to the channels table. Semantics:
@@ -77,27 +79,56 @@ func ReconcileChannels(ctx context.Context, db *sql.DB, cfg *ChannelsConfig) (Re
 	// Step 2: insert missing, update changed.
 	for _, ch := range cfg.Channels {
 		cur, present := existing[ch.Name]
+		desiredUpstream := upstreamURLFromConfig(&ch)
+
 		switch {
 		case !present:
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO channels(name, overwrite_policy, is_default)
-				 VALUES (?, ?, 0)`,
-				ch.Name, ch.OverwritePolicy,
+				`INSERT INTO channels(name, overwrite_policy, is_default, kind, upstream_url)
+				 VALUES (?, ?, 0, ?, ?)`,
+				ch.Name, ch.OverwritePolicy, ch.Kind, nullIfEmpty(desiredUpstream),
 			); err != nil {
 				return result, fmt.Errorf("reconcile: insert %q: %w", ch.Name, err)
 			}
 			result.Created = append(result.Created, ch.Name)
-		case cur.overwritePolicy != ch.OverwritePolicy:
+		case cur.kind != ch.Kind:
+			// Kind changes are not allowed once a channel has package
+			// rows — flipping a populated channel from local to proxy
+			// (or back) would change what the URLs serve under the same
+			// version strings. Surface this loudly so the operator
+			// renames the channel instead.
+			has, err := hasPackages(ctx, tx, ch.Name)
+			if err != nil {
+				return result, err
+			}
+			if has {
+				return result, fmt.Errorf(
+					"reconcile: %q: kind change from %q to %q not allowed: channel has package rows; rename the channel in channels.yaml",
+					ch.Name, cur.kind, ch.Kind,
+				)
+			}
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE channels SET overwrite_policy = ? WHERE name = ?`,
-				ch.OverwritePolicy, ch.Name,
+				`UPDATE channels
+				    SET overwrite_policy = ?, kind = ?, upstream_url = ?
+				  WHERE name = ?`,
+				ch.OverwritePolicy, ch.Kind, nullIfEmpty(desiredUpstream), ch.Name,
+			); err != nil {
+				return result, fmt.Errorf("reconcile: update %q: %w", ch.Name, err)
+			}
+			result.Updated = append(result.Updated, ch.Name)
+		case cur.overwritePolicy != ch.OverwritePolicy || cur.upstreamURL != desiredUpstream:
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE channels
+				    SET overwrite_policy = ?, upstream_url = ?
+				  WHERE name = ?`,
+				ch.OverwritePolicy, nullIfEmpty(desiredUpstream), ch.Name,
 			); err != nil {
 				return result, fmt.Errorf("reconcile: update %q: %w", ch.Name, err)
 			}
 			result.Updated = append(result.Updated, ch.Name)
 		default:
-			// Same policy. Whether the default flag is changing is
-			// decided globally in Step 3; we don't diff it here.
+			// Same policy, same upstream URL, same kind. The default
+			// flag is decided globally in Step 3; not diffed here.
 			result.Unchanged = append(result.Unchanged, ch.Name)
 		}
 	}
@@ -139,7 +170,8 @@ func ReconcileChannels(ctx context.Context, db *sql.DB, cfg *ChannelsConfig) (Re
 }
 
 func loadChannels(ctx context.Context, tx *sql.Tx) (map[string]dbChannel, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT name, overwrite_policy, is_default FROM channels`)
+	rows, err := tx.QueryContext(ctx,
+		`SELECT name, overwrite_policy, is_default, kind, upstream_url FROM channels`)
 	if err != nil {
 		return nil, fmt.Errorf("reconcile: read channels: %w", err)
 	}
@@ -149,16 +181,53 @@ func loadChannels(ctx context.Context, tx *sql.Tx) (map[string]dbChannel, error)
 	for rows.Next() {
 		var c dbChannel
 		var isDefault int
-		if err := rows.Scan(&c.name, &c.overwritePolicy, &isDefault); err != nil {
+		var upstream sql.NullString
+		if err := rows.Scan(&c.name, &c.overwritePolicy, &isDefault, &c.kind, &upstream); err != nil {
 			return nil, fmt.Errorf("reconcile: scan channel: %w", err)
 		}
 		c.isDefault = isDefault == 1
+		if upstream.Valid {
+			c.upstreamURL = upstream.String
+		}
 		out[c.name] = c
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("reconcile: iterate channels: %w", err)
 	}
 	return out, nil
+}
+
+// upstreamURLFromConfig pulls the source URL out of a Channel's
+// Upstream config (empty when nil — the local-channel case).
+func upstreamURLFromConfig(ch *Channel) string {
+	if ch.Upstream == nil {
+		return ""
+	}
+	return ch.Upstream.SourceURL
+}
+
+// nullIfEmpty maps "" → SQL NULL so the upstream_url column stays NULL
+// for local channels rather than holding an empty string.
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// hasPackages reports whether the named channel has any package rows.
+// Used to refuse kind changes on populated channels — flipping a
+// channel from local to proxy (or vice versa) while real packages
+// reference it would silently change what the URLs serve.
+func hasPackages(ctx context.Context, tx *sql.Tx, name string) (bool, error) {
+	var n int
+	err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM packages WHERE channel = ? LIMIT 1`, name,
+	).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("reconcile: count packages: %w", err)
+	}
+	return n > 0, nil
 }
 
 // promoteIfDefaultMoved moves a channel name from Unchanged to Updated

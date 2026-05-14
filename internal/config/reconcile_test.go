@@ -227,6 +227,146 @@ channels:
 	}
 }
 
+func TestReconcileChannelsPersistsKindAndUpstream(t *testing.T) {
+	t.Parallel()
+
+	database := setupDB(t)
+	ctx := context.Background()
+
+	cfg := mustDecodeChannels(t, `
+channels:
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+  - name: cran
+    overwrite_policy: immutable
+    kind: proxy
+    upstream:
+      source_url: https://cloud.r-project.org
+`)
+	if _, err := config.ReconcileChannels(ctx, database.DB, cfg); err != nil {
+		t.Fatalf("ReconcileChannels: %v", err)
+	}
+
+	var (
+		kind     string
+		upstream sql.NullString
+	)
+	if err := database.QueryRowContext(ctx,
+		`SELECT kind, upstream_url FROM channels WHERE name='cran'`).Scan(&kind, &upstream); err != nil {
+		t.Fatalf("read cran: %v", err)
+	}
+	if kind != "proxy" || !upstream.Valid || upstream.String != "https://cloud.r-project.org" {
+		t.Errorf("cran row = (kind=%q upstream=%v); want (proxy, https://cloud.r-project.org)", kind, upstream)
+	}
+
+	// prod (local) must have NULL upstream_url and kind=local.
+	if err := database.QueryRowContext(ctx,
+		`SELECT kind, upstream_url FROM channels WHERE name='prod'`).Scan(&kind, &upstream); err != nil {
+		t.Fatalf("read prod: %v", err)
+	}
+	if kind != "local" || upstream.Valid {
+		t.Errorf("prod row = (kind=%q upstream=%v); want (local, NULL)", kind, upstream)
+	}
+}
+
+func TestReconcileChannelsUpdatesUpstreamURL(t *testing.T) {
+	t.Parallel()
+
+	database := setupDB(t)
+	ctx := context.Background()
+
+	before := mustDecodeChannels(t, `
+channels:
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+  - name: cran
+    overwrite_policy: immutable
+    kind: proxy
+    upstream:
+      source_url: https://cloud.r-project.org
+`)
+	if _, err := config.ReconcileChannels(ctx, database.DB, before); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Move to a pinned PPM snapshot.
+	after := mustDecodeChannels(t, `
+channels:
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+  - name: cran
+    overwrite_policy: immutable
+    kind: proxy
+    upstream:
+      source_url: https://packagemanager.posit.co/cran/2026-01-15
+`)
+	result, err := config.ReconcileChannels(ctx, database.DB, after)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if len(result.Updated) != 1 || result.Updated[0] != "cran" {
+		t.Errorf("Updated = %v, want [cran]", result.Updated)
+	}
+
+	var upstream sql.NullString
+	if err := database.QueryRowContext(ctx,
+		`SELECT upstream_url FROM channels WHERE name='cran'`).Scan(&upstream); err != nil {
+		t.Fatalf("read upstream: %v", err)
+	}
+	if !upstream.Valid || upstream.String != "https://packagemanager.posit.co/cran/2026-01-15" {
+		t.Errorf("upstream_url = %v, want the pinned snapshot URL", upstream)
+	}
+}
+
+func TestReconcileChannelsRefusesKindChangeWhenPopulated(t *testing.T) {
+	t.Parallel()
+
+	database := setupDB(t)
+	ctx := context.Background()
+
+	// Seed a local channel and give it a package row.
+	seed := mustDecodeChannels(t, `
+channels:
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+  - name: legacy
+    overwrite_policy: mutable
+`)
+	if _, err := config.ReconcileChannels(ctx, database.DB, seed); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO packages(channel, name, version, source_sha256, source_size)
+		VALUES ('legacy', 'somepkg', '1.0.0', 'deadbeef', 100)
+	`); err != nil {
+		t.Fatalf("insert package: %v", err)
+	}
+
+	// Try to flip the populated channel from local to proxy.
+	after := mustDecodeChannels(t, `
+channels:
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+  - name: legacy
+    overwrite_policy: mutable
+    kind: proxy
+    upstream:
+      source_url: https://cloud.r-project.org
+`)
+	_, err := config.ReconcileChannels(ctx, database.DB, after)
+	if err == nil {
+		t.Fatal("expected error for kind change on populated channel; got nil")
+	}
+	if !strings.Contains(err.Error(), "kind change") {
+		t.Errorf("error = %v, want one mentioning kind change", err)
+	}
+}
+
 func TestReconcileChannelsNilConfigFails(t *testing.T) {
 	t.Parallel()
 	database := setupDB(t)
