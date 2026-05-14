@@ -8,6 +8,7 @@ import (
 	"github.com/schochastics/packyard/internal/config"
 	"github.com/schochastics/packyard/internal/db"
 	"github.com/schochastics/packyard/internal/metrics"
+	"github.com/schochastics/packyard/internal/store"
 	"github.com/schochastics/packyard/internal/ui"
 )
 
@@ -21,6 +22,7 @@ type Deps struct {
 	Server          *config.ServerConfig
 	Index           *Index           // optional; NewMux fills in if nil
 	Metrics         *metrics.Metrics // optional; NewMux fills in if nil
+	Store           *store.Service   // optional; NewMux fills in if nil
 	UISessionKey    []byte           // HMAC key for /ui/ session cookies; empty disables the UI
 	UISecureCookies bool             // mark /ui/ cookies Secure (production)
 }
@@ -49,6 +51,9 @@ func NewMux(deps Deps) http.Handler {
 	}
 	if deps.Metrics == nil {
 		deps.Metrics = metrics.New()
+	}
+	if deps.Store == nil {
+		deps.Store = store.New(deps.DB.DB, deps.CAS)
 	}
 
 	mux := http.NewServeMux()

@@ -2,16 +2,23 @@ package api
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"time"
 
-	"github.com/schochastics/packyard/internal/auth"
-	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/store"
 )
+
+// storeService returns deps.Store, lazy-initializing it from deps.DB
+// and deps.CAS if the caller didn't wire one up. NewMux does the same
+// during HTTP server start-up; the lazy fallback exists so test
+// helpers that build Deps by hand keep working.
+func storeService(deps Deps) *store.Service {
+	if deps.Store != nil {
+		return deps.Store
+	}
+	return store.New(deps.DB.DB, deps.CAS)
+}
 
 // ImportInput is the in-process equivalent of the multipart publish
 // payload. Importers (drat, git, one-off ops) use this instead of
@@ -62,37 +69,33 @@ func ImportSource(ctx context.Context, deps Deps, in ImportInput) (*PublishRespo
 		return nil, fmt.Errorf("channel %q not found", in.Channel)
 	}
 
-	sum, size, err := deps.CAS.Write(in.Source)
+	svc := storeService(deps)
+	blob, err := svc.WriteBlob(in.Source)
 	if err != nil {
 		return nil, fmt.Errorf("write source to CAS: %w", err)
 	}
 
-	const sourceKey = "source"
-	parts := map[string]partRef{sourceKey: {sha256: sum, size: size}}
-	manifest := Manifest{Source: sourceKey, PublishedBy: in.Actor}
-
-	resp, herr := persistPublish(ctx, deps.DB.DB, publishInput{
-		channel:   in.Channel,
-		name:      in.Name,
-		version:   in.Version,
-		policy:    policy,
-		manifest:  manifest,
-		parts:     parts,
-		publisher: auth.Identity{Label: in.Actor},
+	res, err := svc.Materialize(ctx, store.Input{
+		Channel: in.Channel,
+		Name:    in.Name,
+		Version: in.Version,
+		Policy:  policy,
+		Source:  blob,
+		Actor:   in.Actor,
 	})
-	if herr != nil {
-		// Map the HTTP-shaped error to a plain Go error so CLI callers
-		// aren't tied to api's envelope. Conflict on immutable gets a
-		// sentinel so importers can choose to skip vs abort.
-		if herr.status == http.StatusConflict {
-			return nil, fmt.Errorf("%w: %s", ErrImmutableConflict, herr.msg)
+	if err != nil {
+		// Map the store-layer error to a sentinel CLI callers can
+		// switch on. Other errors flow through unchanged.
+		if errors.Is(err, store.ErrImmutableConflict) {
+			return nil, err // already wraps ErrImmutableConflict
 		}
-		return nil, errors.New(herr.msg)
+		return nil, err
 	}
 
-	if deps.Index != nil && !resp.AlreadyExisted {
+	if deps.Index != nil && !res.AlreadyExisted {
 		deps.Index.InvalidateChannel(in.Channel)
 	}
+	resp := publishResponseFromStore(res)
 	recordPublishMetric(deps, in.Channel, resp)
 	refreshCASBytes(ctx, deps)
 
@@ -112,17 +115,14 @@ func ImportSource(ctx context.Context, deps Deps, in ImportInput) (*PublishRespo
 	return resp, nil
 }
 
-// ErrImmutableConflict is returned by ImportSource when publishing
-// would overwrite an immutable channel with different bytes. Importers
-// surface this to the operator so they can decide whether to skip,
-// bump, or abort.
-var ErrImmutableConflict = errors.New("immutable channel already has this version with different content")
+// ErrImmutableConflict is the api-package alias of
+// [store.ErrImmutableConflict]. Re-exported so existing callers
+// (bundle importer, tests) keep working without an import shuffle.
+var ErrImmutableConflict = store.ErrImmutableConflict
 
-// ErrSourceRowMissing is returned by AttachBinaries when the
-// (channel, name, version) package row doesn't exist. The bundle
-// import flow imports source first and binaries second; an air-gap
-// operator who tries to attach binaries before source sees this.
-var ErrSourceRowMissing = errors.New("source row not found; import the source bundle first")
+// ErrSourceRowMissing is the api-package alias of
+// [store.ErrSourceRowMissing]. See ErrImmutableConflict.
+var ErrSourceRowMissing = store.ErrSourceRowMissing
 
 // AttachInput specifies a single binary to attach to an existing
 // (channel, name, version) row. The package row MUST already exist —
@@ -153,21 +153,7 @@ type AttachInput struct {
 // create packages rows, then imports one or more cell-scoped binary
 // bundles to populate the binaries table.
 //
-// Channel overwrite_policy semantics intentionally diverge from
-// persistPublish on immutable channels:
-//
-//   - immutable + cell absent     → INSERT (adding a new cell to an
-//     existing immutable version is allowed)
-//   - immutable + same sha        → AlreadyExisted=true, no-op
-//   - immutable + different sha   → ErrImmutableConflict
-//   - mutable                     → INSERT or REPLACE
-//
-// persistPublish refuses to add binaries to an existing immutable
-// version because the publish handler can't tell "operator forgot a
-// cell" from "supply-chain attack". The bundle import path is
-// operator-driven, has a sha256-validated manifest, and explicitly
-// composes source + binary imports in separate steps; the diff is
-// intentional.
+// See [store.Service.AttachBinary] for the per-policy semantics.
 func AttachBinaries(ctx context.Context, deps Deps, in AttachInput) (*PublishResponse, error) {
 	if !packageNameRE.MatchString(in.Name) {
 		return nil, fmt.Errorf("invalid package name %q", in.Name)
@@ -193,105 +179,43 @@ func AttachBinaries(ctx context.Context, deps Deps, in AttachInput) (*PublishRes
 		return nil, fmt.Errorf("channel %q not found", in.Channel)
 	}
 
-	var (
-		packageID  int64
-		sourceSHA  string
-		sourceSize int64
-	)
-	err = deps.DB.QueryRowContext(ctx, `
-		SELECT id, source_sha256, source_size FROM packages
-		WHERE channel = ? AND name = ? AND version = ?
-	`, in.Channel, in.Name, in.Version).Scan(&packageID, &sourceSHA, &sourceSize)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("%w: %s@%s on channel %s", ErrSourceRowMissing, in.Name, in.Version, in.Channel)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read package row: %w", err)
-	}
-
-	binSHA, binSize, err := deps.CAS.Write(in.Binary)
+	svc := storeService(deps)
+	blob, err := svc.WriteBlob(in.Binary)
 	if err != nil {
 		return nil, fmt.Errorf("write binary to CAS: %w", err)
 	}
 
-	resp := &PublishResponse{
-		Channel:      in.Channel,
-		Name:         in.Name,
-		Version:      in.Version,
-		SourceSHA256: sourceSHA,
-		SourceSize:   sourceSize,
-		Binaries: []PublishedBinary{
-			{Cell: in.Cell, SHA256: binSHA, Size: binSize},
-		},
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	tx, err := deps.DB.BeginTx(ctx, nil)
+	res, err := svc.AttachBinary(ctx, store.AttachInput{
+		Channel: in.Channel,
+		Name:    in.Name,
+		Version: in.Version,
+		Policy:  policy,
+		Cell:    in.Cell,
+		Binary:  blob,
+		Actor:   in.Actor,
+		Note:    in.Note,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
-	}
-	defer func() {
-		_ = tx.Rollback() // no-op after Commit
-	}()
-
-	var existingSHA string
-	row := tx.QueryRowContext(ctx,
-		`SELECT binary_sha256 FROM binaries WHERE package_id = ? AND cell = ?`,
-		packageID, in.Cell)
-	switch err := row.Scan(&existingSHA); {
-	case errors.Is(err, sql.ErrNoRows):
-		// Insert a new binary row. Allowed regardless of overwrite policy.
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO binaries(package_id, cell, binary_sha256, size, uploaded_at)
-			VALUES (?, ?, ?, ?, ?)
-		`, packageID, in.Cell, binSHA, binSize, now); err != nil {
-			return nil, fmt.Errorf("insert binary: %w", err)
-		}
-	case err != nil:
-		return nil, fmt.Errorf("read existing binary: %w", err)
-	case existingSHA == binSHA:
-		// Idempotent re-attach: identical bytes, no work to do.
-		resp.AlreadyExisted = true
-	case policy == config.PolicyImmutable:
-		return nil, fmt.Errorf("%w: %s@%s on channel %s, cell %s",
-			ErrImmutableConflict, in.Name, in.Version, in.Channel, in.Cell)
-	default:
-		// Mutable channel + different bytes: replace.
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE binaries
-			   SET binary_sha256 = ?, size = ?, uploaded_at = ?
-			 WHERE package_id = ? AND cell = ?
-		`, binSHA, binSize, now, packageID, in.Cell); err != nil {
-			return nil, fmt.Errorf("update binary: %w", err)
-		}
-		resp.Overwritten = true
+		return nil, err
 	}
 
-	if !resp.AlreadyExisted {
-		// Append an attribution event so /ui/events shows the binary
-		// import alongside the source publish.
-		note := fmt.Sprintf("cell=%s sha256=%s", in.Cell, binSHA)
-		if in.Note != "" {
-			note = in.Note + " " + note
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO events(at, type, actor, channel, package, version, note)
-			VALUES (?, 'import_binary', ?, ?, ?, ?, ?)
-		`, now, nullIfEmpty(in.Actor), in.Channel, in.Name, in.Version, note); err != nil {
-			return nil, fmt.Errorf("append event: %w", err)
-		}
+	resp := &PublishResponse{
+		Channel:        res.Channel,
+		Name:           res.Name,
+		Version:        res.Version,
+		SourceSHA256:   res.SourceSHA256,
+		SourceSize:     res.SourceSize,
+		Binaries:       []PublishedBinary{{Cell: res.Cell, SHA256: res.Binary.SHA256, Size: res.Binary.Size}},
+		AlreadyExisted: res.AlreadyExisted,
+		Overwritten:    res.Overwritten,
 	}
 
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
-	}
-
-	if deps.Index != nil && !resp.AlreadyExisted {
+	if deps.Index != nil && !res.AlreadyExisted {
 		deps.Index.InvalidateChannel(in.Channel)
 	}
-	if deps.Metrics != nil && !resp.AlreadyExisted {
+	if deps.Metrics != nil && !res.AlreadyExisted {
 		result := "created"
-		if resp.Overwritten {
+		if res.Overwritten {
 			result = "overwrote"
 		}
 		deps.Metrics.PublishTotal.WithLabelValues(in.Channel, result).Inc()
@@ -299,4 +223,25 @@ func AttachBinaries(ctx context.Context, deps Deps, in AttachInput) (*PublishRes
 	refreshCASBytes(ctx, deps)
 
 	return resp, nil
+}
+
+// publishResponseFromStore converts a store.Result into the API's
+// PublishResponse shape. Used by both ImportSource and the HTTP
+// publish handler (via publishViaStore).
+func publishResponseFromStore(r *store.Result) *PublishResponse {
+	resp := &PublishResponse{
+		Channel:        r.Channel,
+		Name:           r.Name,
+		Version:        r.Version,
+		SourceSHA256:   r.Source.SHA256,
+		SourceSize:     r.Source.Size,
+		AlreadyExisted: r.AlreadyExisted,
+		Overwritten:    r.Overwritten,
+	}
+	for _, b := range r.Binaries {
+		resp.Binaries = append(resp.Binaries, PublishedBinary{
+			Cell: b.Cell, SHA256: b.Blob.SHA256, Size: b.Blob.Size,
+		})
+	}
+	return resp
 }

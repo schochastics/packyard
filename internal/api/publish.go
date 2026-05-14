@@ -9,11 +9,10 @@ import (
 	"io"
 	"net/http"
 	"regexp"
-	"time"
 
-	"github.com/schochastics/packyard/internal/auth"
 	"github.com/schochastics/packyard/internal/cas"
 	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/store"
 )
 
 // maxRequestBytes caps a single publish upload. 2 GiB is well above the
@@ -151,15 +150,7 @@ func handlePublish(deps Deps) http.HandlerFunc {
 		id, _ := IdentityFromContext(r.Context())
 		manifest.PublishedBy = id.Label
 
-		resp, herr := persistPublish(r.Context(), deps.DB.DB, publishInput{
-			channel:   channel,
-			name:      name,
-			version:   version,
-			policy:    policy,
-			manifest:  manifest,
-			parts:     parts,
-			publisher: id,
-		})
+		resp, herr := publishViaStore(r.Context(), storeService(deps), channel, name, version, policy, manifest, parts, id.Label)
 		if herr != nil {
 			herr.write(w, r)
 			return
@@ -215,6 +206,65 @@ func lookupChannelPolicy(ctx context.Context, db *sql.DB, name string) (string, 
 		return "", false, err
 	}
 	return policy, true, nil
+}
+
+// publishViaStore is the HTTP-facing wrapper around
+// [store.Service.Materialize]. It translates a validated multipart
+// publish into the store's Input shape, runs the materialization, and
+// maps the store's plain-Go errors back into HTTP-flavored ones.
+func publishViaStore(
+	ctx context.Context,
+	svc *store.Service,
+	channel, name, version, policy string,
+	manifest Manifest,
+	parts map[string]partRef,
+	actor string,
+) (*PublishResponse, *httpError) {
+	src := parts[manifest.Source]
+	in := store.Input{
+		Channel: channel,
+		Name:    name,
+		Version: version,
+		Policy:  policy,
+		Source:  store.BlobRef{SHA256: src.sha256, Size: src.size},
+		Actor:   actor,
+	}
+	for _, b := range manifest.Binaries {
+		p := parts[b.Part]
+		in.Binaries = append(in.Binaries, store.BinaryInput{
+			Cell: b.Cell,
+			Blob: store.BlobRef{SHA256: p.sha256, Size: p.size},
+		})
+	}
+
+	res, err := svc.Materialize(ctx, in)
+	if err != nil {
+		if errors.Is(err, store.ErrImmutableConflict) {
+			return nil, &httpError{
+				status: http.StatusConflict,
+				code:   CodeVersionImmutable,
+				msg:    fmt.Sprintf("%s@%s already exists on immutable channel %s with different content", name, version, channel),
+				hint:   "bump the version, or republish with byte-identical content",
+			}
+		}
+		return nil, internalErr("materialize", err)
+	}
+
+	resp := &PublishResponse{
+		Channel:        res.Channel,
+		Name:           res.Name,
+		Version:        res.Version,
+		SourceSHA256:   res.Source.SHA256,
+		SourceSize:     res.Source.Size,
+		AlreadyExisted: res.AlreadyExisted,
+		Overwritten:    res.Overwritten,
+	}
+	for _, b := range res.Binaries {
+		resp.Binaries = append(resp.Binaries, PublishedBinary{
+			Cell: b.Cell, SHA256: b.Blob.SHA256, Size: b.Blob.Size,
+		})
+	}
+	return resp, nil
 }
 
 // httpError is an error that already knows its HTTP representation.
@@ -437,155 +487,6 @@ func validateManifest(m Manifest, parts map[string]partRef, matrix *config.Matri
 		}
 	}
 	return nil
-}
-
-// publishInput is the assembled state the persist step works from.
-type publishInput struct {
-	channel   string
-	name      string
-	version   string
-	policy    string
-	manifest  Manifest
-	parts     map[string]partRef
-	publisher auth.Identity
-}
-
-// persistPublish reconciles a validated publish with the DB inside a
-// single transaction. Returns a PublishResponse or an httpError.
-func persistPublish(ctx context.Context, db *sql.DB, in publishInput) (*PublishResponse, *httpError) {
-	src := in.parts[in.manifest.Source]
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, internalErr("begin tx", err)
-	}
-	defer func() {
-		_ = tx.Rollback() // no-op after Commit
-	}()
-
-	var (
-		existingID     int64
-		existingSHA    string
-		existingPolicy = in.policy
-		exists         bool
-	)
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, source_sha256 FROM packages
-		WHERE channel = ? AND name = ? AND version = ?
-	`, in.channel, in.name, in.version).Scan(&existingID, &existingSHA)
-	switch {
-	case err == nil:
-		exists = true
-	case errors.Is(err, sql.ErrNoRows):
-		exists = false
-	default:
-		return nil, internalErr("read existing package", err)
-	}
-
-	resp := &PublishResponse{
-		Channel:      in.channel,
-		Name:         in.name,
-		Version:      in.version,
-		SourceSHA256: src.sha256,
-		SourceSize:   src.size,
-	}
-	for _, b := range in.manifest.Binaries {
-		p := in.parts[b.Part]
-		resp.Binaries = append(resp.Binaries, PublishedBinary{
-			Cell: b.Cell, SHA256: p.sha256, Size: p.size,
-		})
-	}
-
-	switch {
-	case !exists:
-		if err := insertPackageAndBinaries(ctx, tx, in, now); err != nil {
-			return nil, internalErr("insert package", err)
-		}
-		if err := appendEvent(ctx, tx, "publish", in, now); err != nil {
-			return nil, internalErr("append event", err)
-		}
-	case existingPolicy == config.PolicyImmutable:
-		if existingSHA != src.sha256 {
-			return nil, &httpError{
-				status: http.StatusConflict,
-				code:   CodeVersionImmutable,
-				msg:    fmt.Sprintf("%s@%s already exists on immutable channel %s with different content", in.name, in.version, in.channel),
-				hint:   "bump the version, or republish with byte-identical content",
-			}
-		}
-		// Idempotent re-publish on immutable: tell the caller no new
-		// work was done. We don't touch binaries here; to add a cell to
-		// an already-published immutable version, delete and republish.
-		resp.AlreadyExisted = true
-		if err := appendEvent(ctx, tx, "publish_idempotent", in, now); err != nil {
-			return nil, internalErr("append event", err)
-		}
-	default:
-		// Mutable channel: replace. Old source and old binary blobs
-		// stay in CAS until GC reclaims them.
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE packages
-			   SET source_sha256 = ?, source_size = ?, published_at = ?,
-			       published_by = ?, yanked = 0, yank_reason = NULL
-			 WHERE id = ?
-		`, src.sha256, src.size, now, nullIfEmpty(in.publisher.Label), existingID); err != nil {
-			return nil, internalErr("update package", err)
-		}
-		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM binaries WHERE package_id = ?`, existingID); err != nil {
-			return nil, internalErr("delete old binaries", err)
-		}
-		if err := insertBinariesFor(ctx, tx, existingID, in, now); err != nil {
-			return nil, internalErr("insert replacement binaries", err)
-		}
-		resp.Overwritten = true
-		if err := appendEvent(ctx, tx, "publish_overwrite", in, now); err != nil {
-			return nil, internalErr("append event", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, internalErr("commit", err)
-	}
-	return resp, nil
-}
-
-func insertPackageAndBinaries(ctx context.Context, tx *sql.Tx, in publishInput, now string) error {
-	src := in.parts[in.manifest.Source]
-	res, err := tx.ExecContext(ctx, `
-		INSERT INTO packages(channel, name, version, source_sha256, source_size, published_at, published_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, in.channel, in.name, in.version, src.sha256, src.size, now, nullIfEmpty(in.publisher.Label))
-	if err != nil {
-		return err
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return err
-	}
-	return insertBinariesFor(ctx, tx, id, in, now)
-}
-
-func insertBinariesFor(ctx context.Context, tx *sql.Tx, packageID int64, in publishInput, now string) error {
-	for _, b := range in.manifest.Binaries {
-		p := in.parts[b.Part]
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO binaries(package_id, cell, binary_sha256, size, uploaded_at)
-			VALUES (?, ?, ?, ?, ?)
-		`, packageID, b.Cell, p.sha256, p.size, now); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func appendEvent(ctx context.Context, tx *sql.Tx, eventType string, in publishInput, now string) error {
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO events(at, type, actor, channel, package, version, note)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, now, eventType, nullIfEmpty(in.publisher.Label), in.channel, in.name, in.version, nil)
-	return err
 }
 
 // nullIfEmpty converts "" → NULL for sql.NullString columns we want to
