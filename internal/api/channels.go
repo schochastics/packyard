@@ -11,12 +11,14 @@ import (
 // shape matches design.md §7's general rule; the "package_count" stat
 // is a COUNT aggregate, not a nested list.
 type ChannelSummary struct {
-	Name            string  `json:"name"`
-	OverwritePolicy string  `json:"overwrite_policy"`
-	Default         bool    `json:"default"`
-	CreatedAt       string  `json:"created_at"`
-	PackageCount    int64   `json:"package_count"`
-	LatestPublishAt *string `json:"latest_publish_at,omitempty"`
+	Name              string  `json:"name"`
+	OverwritePolicy   string  `json:"overwrite_policy"`
+	Default           bool    `json:"default"`
+	Kind              string  `json:"kind"`
+	UpstreamSourceURL *string `json:"upstream_source_url,omitempty"`
+	CreatedAt         string  `json:"created_at"`
+	PackageCount      int64   `json:"package_count"`
+	LatestPublishAt   *string `json:"latest_publish_at,omitempty"`
 }
 
 // ListChannelsResponse wraps the slice so later fields (filters
@@ -38,12 +40,14 @@ func handleListChannels(deps Deps) http.HandlerFunc {
 		}
 
 		rows, err := deps.DB.QueryContext(r.Context(), `
-			SELECT c.name, c.overwrite_policy, c.is_default, c.created_at,
+			SELECT c.name, c.overwrite_policy, c.is_default, c.kind,
+			       c.upstream_url, c.created_at,
 			       COUNT(p.id) AS package_count,
 			       MAX(p.published_at) AS latest_publish_at
 			FROM channels c
 			LEFT JOIN packages p ON p.channel = c.name
-			GROUP BY c.name, c.overwrite_policy, c.is_default, c.created_at
+			GROUP BY c.name, c.overwrite_policy, c.is_default, c.kind,
+			         c.upstream_url, c.created_at
 			ORDER BY c.name
 		`)
 		if err != nil {
@@ -55,22 +59,25 @@ func handleListChannels(deps Deps) http.HandlerFunc {
 		out := []ChannelSummary{}
 		for rows.Next() {
 			var (
-				name, policy, createdAt string
-				isDefault               int
-				count                   int64
-				latest                  sql.NullString
+				name, policy, kind, createdAt string
+				upstream                      sql.NullString
+				isDefault                     int
+				count                         int64
+				latest                        sql.NullString
 			)
-			if err := rows.Scan(&name, &policy, &isDefault, &createdAt, &count, &latest); err != nil {
+			if err := rows.Scan(&name, &policy, &isDefault, &kind, &upstream, &createdAt, &count, &latest); err != nil {
 				internalErr("scan channel", err).write(w, r)
 				return
 			}
 			out = append(out, ChannelSummary{
-				Name:            name,
-				OverwritePolicy: policy,
-				Default:         isDefault == 1,
-				CreatedAt:       createdAt,
-				PackageCount:    count,
-				LatestPublishAt: nullToPtr(latest),
+				Name:              name,
+				OverwritePolicy:   policy,
+				Default:           isDefault == 1,
+				Kind:              kind,
+				UpstreamSourceURL: nullToPtr(upstream),
+				CreatedAt:         createdAt,
+				PackageCount:      count,
+				LatestPublishAt:   nullToPtr(latest),
 			})
 		}
 		if err := rows.Err(); err != nil {

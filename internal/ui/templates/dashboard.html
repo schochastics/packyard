@@ -17,9 +17,11 @@
         <span class="card-name">{{.Name}}</span>
         {{if .IsDefault}}<span class="tag tag-default">default</span>{{end}}
         <span class="tag tag-{{.OverwritePolicy}}">{{.OverwritePolicy}}</span>
+        {{if .IsProxy}}<span class="tag tag-proxy" title="{{.UpstreamURL}}">proxy</span>{{end}}
       </div>
       <div class="card-body">
         <div><strong>{{.PackageCount}}</strong> package{{if ne .PackageCount 1}}s{{end}}</div>
+        {{if .IsProxy}}<div class="muted">Upstream: {{.UpstreamURL}}</div>{{end}}
         <div class="muted">Latest: {{fmtTime .LatestPublishAt}}</div>
       </div>
     </a>

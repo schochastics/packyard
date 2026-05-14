@@ -224,6 +224,7 @@ h2 {
 .tag-default   { background: #e9f3ff; color: #1d4478; }
 .tag-mutable   { background: #fff3df; color: #6a4a12; }
 .tag-immutable { background: #eefbe9; color: #24611c; }
+.tag-proxy     { background: #f3e9ff; color: #4b1d78; }
 .tag-yanked    { background: #fdecea; color: #7a1e1e; }
 .tag-ok        { background: #eefbe9; color: #24611c; }
 

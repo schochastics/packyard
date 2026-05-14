@@ -49,6 +49,13 @@ func TestListChannelsShapeAndStats(t *testing.T) {
 	if dev.Default {
 		t.Error("dev unexpectedly marked default (prod is default in fixture)")
 	}
+	// Pre-proxy fixture channels are local; the kind field surfaces it.
+	if dev.Kind != "local" {
+		t.Errorf("dev Kind = %q, want local", dev.Kind)
+	}
+	if dev.UpstreamSourceURL != nil {
+		t.Errorf("dev UpstreamSourceURL = %v, want nil for local channel", *dev.UpstreamSourceURL)
+	}
 
 	prod, ok := byName["prod"]
 	if !ok {

@@ -14,9 +14,15 @@ type channelCard struct {
 	Name            string
 	OverwritePolicy string
 	IsDefault       bool
+	Kind            string // "local" or "proxy"
+	UpstreamURL     string // empty for local channels
 	PackageCount    int64
 	LatestPublishAt string // empty when the channel has no packages yet
 }
+
+// IsProxy returns true for proxy channels — used by templates to
+// flip the kind badge.
+func (c channelCard) IsProxy() bool { return c.Kind == "proxy" }
 
 // eventRow is one entry in the recent-events feed. All optional fields
 // are empty strings when the underlying column was NULL, so templates
@@ -86,12 +92,13 @@ func loadDashboardData(ctx context.Context, d *sql.DB, eventLimit int) (*dashboa
 
 func loadChannelCards(ctx context.Context, d *sql.DB) ([]channelCard, error) {
 	rows, err := d.QueryContext(ctx, `
-		SELECT c.name, c.overwrite_policy, c.is_default,
+		SELECT c.name, c.overwrite_policy, c.is_default, c.kind,
+		       COALESCE(c.upstream_url, ''),
 		       COUNT(p.id) AS package_count,
 		       COALESCE(MAX(p.published_at), '') AS latest
 		FROM channels c
 		LEFT JOIN packages p ON p.channel = c.name
-		GROUP BY c.name, c.overwrite_policy, c.is_default
+		GROUP BY c.name, c.overwrite_policy, c.is_default, c.kind, c.upstream_url
 		ORDER BY c.is_default DESC, c.name
 	`)
 	if err != nil {
@@ -105,7 +112,7 @@ func loadChannelCards(ctx context.Context, d *sql.DB) ([]channelCard, error) {
 			c         channelCard
 			isDefault int
 		)
-		if err := rows.Scan(&c.Name, &c.OverwritePolicy, &isDefault, &c.PackageCount, &c.LatestPublishAt); err != nil {
+		if err := rows.Scan(&c.Name, &c.OverwritePolicy, &isDefault, &c.Kind, &c.UpstreamURL, &c.PackageCount, &c.LatestPublishAt); err != nil {
 			return nil, err
 		}
 		c.IsDefault = isDefault == 1

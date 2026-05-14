@@ -69,6 +69,7 @@ components:
             - conflict
             - version_immutable
             - channel_immutable
+            - channel_is_proxy
             - internal_error
             - unavailable
             - payload_too_large
@@ -196,7 +197,7 @@ components:
     # ---- Channels ------------------------------------------------------
     ChannelSummary:
       type: object
-      required: [name, overwrite_policy, default, created_at, package_count]
+      required: [name, overwrite_policy, default, kind, created_at, package_count]
       properties:
         name:
           type: string
@@ -207,6 +208,21 @@ components:
         default:
           type: boolean
           description: Exactly one channel is the default across the server.
+        kind:
+          type: string
+          enum: [local, proxy]
+          description: |
+            local channels are written into by publish / import.
+            proxy channels materialize from an upstream CRAN-protocol
+            server on read (Verdaccio-style uplink, see design.md §15).
+        upstream_source_url:
+          type: string
+          format: uri
+          nullable: true
+          description: |
+            For proxy channels, the upstream base URL appended with
+            /src/contrib/PACKAGES for index lookups. Absent on local
+            channels.
         created_at:
           type: string
           format: date-time
