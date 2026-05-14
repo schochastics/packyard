@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+
+	"github.com/schochastics/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/upstream"
 )
 
 // handleBinaryPackages serves GET /{channel}/bin/linux/{cell}/PACKAGES.
@@ -110,10 +113,105 @@ func serveBinaryTarball(w http.ResponseWriter, r *http.Request, deps Deps, chann
 	}
 	sum, size, herr := lookupBinaryBlob(r.Context(), deps.DB.DB, channel, name, version, cell)
 	if herr != nil {
-		herr.write(w, r)
-		return
+		if herr.status == http.StatusNotFound {
+			if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
+				if herr2 := proxyFetchBinaryTarball(r.Context(), deps, meta, name, version, cell); herr2 != nil {
+					herr2.write(w, r)
+					return
+				}
+				sum, size, herr = lookupBinaryBlob(r.Context(), deps.DB.DB, channel, name, version, cell)
+			}
+		}
+		if herr != nil {
+			herr.write(w, r)
+			return
+		}
 	}
 	serveBlob(w, r, deps, sum, size, "application/x-gzip")
+}
+
+// proxyFetchBinaryTarball materializes one (channel, name, version,
+// cell) binary on a proxy channel. If the upstream binary URL for the
+// cell isn't configured, returns 404 directly. Otherwise:
+//
+//  1. Ensure the source row exists locally (proxy-fetch the source
+//     tarball if not — every binary attaches to a source row).
+//  2. Fetch the binary tarball from the cell's upstream base URL.
+//  3. AttachBinary to the existing source row + emit a
+//     "proxy_tarball_fetch" event.
+func proxyFetchBinaryTarball(ctx context.Context, deps Deps, meta *channelMeta, name, version, cell string) *httpError {
+	if deps.Upstream == nil {
+		return internalErr("proxy fetch", errNoUpstreamFetcher)
+	}
+	binBase, ok := meta.Upstream.BinaryURLs[cell]
+	if !ok || binBase == "" {
+		return &httpError{
+			status: http.StatusNotFound,
+			code:   CodeNotFound,
+			msg:    fmt.Sprintf("proxy channel %q has no upstream configured for cell %s", meta.Name, cell),
+			hint:   "add the cell to channels.yaml under upstream.binary_urls, or fall back to source compile",
+		}
+	}
+
+	// Source-row precondition: AttachBinary refuses without a source
+	// row. Fetch source on demand if missing.
+	var srcExists bool
+	if err := deps.DB.QueryRowContext(ctx,
+		`SELECT 1 FROM packages WHERE channel = ? AND name = ? AND version = ?`,
+		meta.Name, name, version).Scan(new(int)); err == nil {
+		srcExists = true
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return internalErr("source row lookup", err)
+	}
+	if !srcExists {
+		if herr := proxyFetchSourceTarball(ctx, deps, meta, name, version); herr != nil {
+			return herr
+		}
+	}
+
+	filename := fmt.Sprintf("%s_%s.tar.gz", name, version)
+	blob, err := deps.Upstream.FetchTarball(ctx, binBase, filename,
+		meta.Upstream.TarballMaxSize, meta.Upstream.Timeout)
+	if err != nil {
+		if upstream.NotFound(err) {
+			return &httpError{
+				status: http.StatusNotFound,
+				code:   CodeNotFound,
+				msg:    fmt.Sprintf("%s@%s binary not available upstream for cell %s on channel %s", name, version, cell, meta.Name),
+			}
+		}
+		if deps.Metrics != nil {
+			deps.Metrics.ProxyFetchTotal.WithLabelValues(meta.Name, "binary", "upstream_error").Inc()
+		}
+		return &httpError{
+			status: http.StatusBadGateway,
+			code:   CodeUnavailable,
+			msg:    "upstream binary tarball fetch failed",
+			hint:   err.Error(),
+		}
+	}
+	if _, err := deps.Store.AttachBinary(ctx, store.AttachInput{
+		Channel: meta.Name,
+		Name:    name,
+		Version: version,
+		Policy:  meta.Policy,
+		Cell:    cell,
+		Binary:  blob,
+		Actor:   "proxy:" + binBase,
+	}); err != nil {
+		return internalErr("attach proxy binary", err)
+	}
+	if deps.Metrics != nil {
+		deps.Metrics.ProxyFetchTotal.WithLabelValues(meta.Name, "binary", "ok").Inc()
+	}
+	_, _ = deps.DB.ExecContext(ctx, `
+		INSERT INTO events(type, channel, package, version, note)
+		VALUES ('proxy_tarball_fetch', ?, ?, ?, ?)
+	`, meta.Name, name, version, fmt.Sprintf("cell=%s upstream=%s", cell, binBase))
+	if deps.Index != nil {
+		deps.Index.InvalidateChannel(meta.Name)
+	}
+	return nil
 }
 
 // lookupBinaryBlob fetches the binary sha256/size for a (channel, name,
@@ -163,9 +261,29 @@ func loadBinaryPackages(ctx context.Context, deps Deps, channel, cell string) ([
 		}
 	}
 	rMinor := deps.Matrix.Lookup(cell).RMinor
-	body, err := deps.Index.GetBinary(ctx, channel, cell, rMinor)
+	meta := lookupChannelMeta(ctx, deps, channel)
+	body, stale, err := deps.Index.GetBinary(ctx, channel, cell, rMinor, meta, deps.Upstream)
 	if err != nil {
+		if meta.IsProxy() {
+			return nil, &httpError{
+				status: http.StatusServiceUnavailable,
+				code:   CodeUnavailable,
+				msg:    "upstream binary PACKAGES fetch failed",
+				hint:   err.Error(),
+			}
+		}
 		return nil, internalErr("build binary packages", err)
+	}
+	if stale {
+		_, _ = deps.DB.ExecContext(ctx, `
+			INSERT INTO events(type, channel, note)
+			VALUES ('proxy_index_stale_served', ?, 'binary PACKAGES upstream unreachable')
+		`, channel)
+		if deps.Metrics != nil {
+			deps.Metrics.ProxyFetchTotal.WithLabelValues(channel, "index", "stale").Inc()
+		}
+	} else if meta.IsProxy() && deps.Metrics != nil {
+		deps.Metrics.ProxyFetchTotal.WithLabelValues(channel, "index", "ok").Inc()
 	}
 	return body, nil
 }

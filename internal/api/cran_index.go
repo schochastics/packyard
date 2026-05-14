@@ -8,6 +8,9 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/upstream"
 )
 
 // Ways the CRAN-protocol read surface differs from strict CRAN:
@@ -58,9 +61,36 @@ func binaryKey(channel, cell string) string  { return "bin:" + channel + ":" + c
 func keysForChannel(channel string) []string { return []string{sourceKey(channel)} }
 func binaryKeyPrefix(channel string) string  { return "bin:" + channel + ":" }
 
-// GetSource returns the source PACKAGES body for channel, building
-// (and caching) it from the DB on a miss or stale entry.
-func (i *Index) GetSource(ctx context.Context, channel string) ([]byte, error) {
+// GetSource returns the source PACKAGES body for channel.
+//
+// For local channels, it builds (and caches) from the DB on a miss
+// or stale entry. For proxy channels, it fetches from upstream
+// (with the channel's configured TTL) and caches the response; on
+// upstream failure it serves a stale cached body with stale=true so
+// the caller can emit a "proxy_index_stale_served" event.
+//
+// meta may be nil — in that case the channel is treated as local,
+// matching the pre-proxy behavior. fetcher is consulted only on the
+// proxy branch.
+func (i *Index) GetSource(ctx context.Context, channel string, meta *channelMeta, fetcher *upstream.Fetcher) (body []byte, stale bool, err error) {
+	if meta.IsProxy() {
+		return i.getSourceProxy(ctx, channel, meta.Upstream, fetcher)
+	}
+	body, err = i.getSourceLocal(ctx, channel)
+	return body, false, err
+}
+
+// GetBinary returns the binary PACKAGES body for (channel, cell).
+// See [Index.GetSource] for the proxy/stale semantics.
+func (i *Index) GetBinary(ctx context.Context, channel, cell, rMinor string, meta *channelMeta, fetcher *upstream.Fetcher) (body []byte, stale bool, err error) {
+	if meta.IsProxy() {
+		return i.getBinaryProxy(ctx, channel, cell, meta.Upstream, fetcher)
+	}
+	body, err = i.getBinaryLocal(ctx, channel, cell, rMinor)
+	return body, false, err
+}
+
+func (i *Index) getSourceLocal(ctx context.Context, channel string) ([]byte, error) {
 	key := sourceKey(channel)
 	if body, ok := i.lookup(key); ok {
 		return body, nil
@@ -69,12 +99,11 @@ func (i *Index) GetSource(ctx context.Context, channel string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	i.store(key, body)
+	i.storeWithTTL(key, body, i.ttl)
 	return body, nil
 }
 
-// GetBinary returns the binary PACKAGES body for (channel, cell).
-func (i *Index) GetBinary(ctx context.Context, channel, cell, rMinor string) ([]byte, error) {
+func (i *Index) getBinaryLocal(ctx context.Context, channel, cell, rMinor string) ([]byte, error) {
 	key := binaryKey(channel, cell)
 	if body, ok := i.lookup(key); ok {
 		return body, nil
@@ -83,9 +112,53 @@ func (i *Index) GetBinary(ctx context.Context, channel, cell, rMinor string) ([]
 	if err != nil {
 		return nil, err
 	}
-	i.store(key, body)
+	i.storeWithTTL(key, body, i.ttl)
 	return body, nil
 }
+
+func (i *Index) getSourceProxy(ctx context.Context, channel string, up upstreamView, fetcher *upstream.Fetcher) ([]byte, bool, error) {
+	return i.getProxyIndex(ctx, sourceKey(channel), up.SourceURL, up.IndexTTL, up.Timeout, fetcher)
+}
+
+func (i *Index) getBinaryProxy(ctx context.Context, channel, cell string, up upstreamView, fetcher *upstream.Fetcher) ([]byte, bool, error) {
+	base, ok := up.BinaryURLs[cell]
+	if !ok || base == "" {
+		// No upstream configured for this cell — surface as "PACKAGES
+		// is empty" so R clients can still ask the source PACKAGES
+		// for the same channel and fall back to compile-from-source.
+		return []byte{}, false, nil
+	}
+	return i.getProxyIndex(ctx, binaryKey(channel, cell), base, up.IndexTTL, up.Timeout, fetcher)
+}
+
+// getProxyIndex is the shared "fetch from upstream with TTL +
+// stale-while-error" core used by both source and binary proxy paths.
+func (i *Index) getProxyIndex(ctx context.Context, key, baseURL string, ttl, timeout time.Duration, fetcher *upstream.Fetcher) ([]byte, bool, error) {
+	if fetcher == nil {
+		return nil, false, fmt.Errorf("proxy channel %q needs a fetcher; none configured", key)
+	}
+	prev, hasPrev := i.peek(key)
+	if hasPrev && time.Now().Before(prev.expires) {
+		return prev.body, false, nil
+	}
+	body, _, err := fetcher.FetchIndex(ctx, baseURL, timeout)
+	if err != nil {
+		if hasPrev {
+			// Stale-while-error: keep the previous body in the cache
+			// so the next reader also gets it. We don't bump its
+			// expiry — we want the next request to re-try upstream.
+			return prev.body, true, nil
+		}
+		return nil, false, err
+	}
+	i.storeWithTTL(key, body, ttl)
+	return body, false, nil
+}
+
+// upstreamView is a documentation alias of [config.UpstreamConfig].
+// Kept distinct from channelMeta so test fixtures can construct an
+// Upstream without importing the api package's internal types.
+type upstreamView = config.UpstreamConfig
 
 // InvalidateChannel drops all cached entries for channel — both the
 // source PACKAGES and every (channel, *) binary PACKAGES. Called by
@@ -127,12 +200,25 @@ func (i *Index) lookup(key string) ([]byte, bool) {
 	return e.body, true
 }
 
-func (i *Index) store(key string, body []byte) {
+// peek returns the entry for key without evicting on expiry. The
+// proxy path needs this for stale-while-error: a stale entry is the
+// fallback when an upstream refresh fails.
+func (i *Index) peek(key string) (indexEntry, bool) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	e, ok := i.entries[key]
+	return e, ok
+}
+
+func (i *Index) storeWithTTL(key string, body []byte, ttl time.Duration) {
+	if ttl <= 0 {
+		ttl = i.ttl
+	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.entries[key] = indexEntry{
 		body:    body,
-		expires: time.Now().Add(i.ttl),
+		expires: time.Now().Add(ttl),
 	}
 }
 

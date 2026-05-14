@@ -68,7 +68,7 @@ func TestGetSourceEmptyChannel(t *testing.T) {
 	database := setupIndexDB(t)
 	idx := NewIndex(database.DB)
 
-	body, err := idx.GetSource(context.Background(), "dev")
+	body, _, err := idx.GetSource(context.Background(), "dev", nil, nil)
 	if err != nil {
 		t.Fatalf("GetSource: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestGetSourceStanzasIncludeYanked(t *testing.T) {
 	seedPackage(t, database, "dev", "alpha", "1.1.0", false)
 
 	idx := NewIndex(database.DB)
-	body, err := idx.GetSource(context.Background(), "dev")
+	body, _, err := idx.GetSource(context.Background(), "dev", nil, nil)
 	if err != nil {
 		t.Fatalf("GetSource: %v", err)
 	}
@@ -115,17 +115,17 @@ func TestInvalidateChannelForcesRebuild(t *testing.T) {
 	seedPackage(t, database, "dev", "alpha", "1.0.0", false)
 
 	idx := NewIndex(database.DB)
-	first, _ := idx.GetSource(context.Background(), "dev")
+	first, _, _ := idx.GetSource(context.Background(), "dev", nil, nil)
 
 	// Add a package directly; without invalidation the cache hides it.
 	seedPackage(t, database, "dev", "beta", "2.0.0", false)
-	cached, _ := idx.GetSource(context.Background(), "dev")
+	cached, _, _ := idx.GetSource(context.Background(), "dev", nil, nil)
 	if string(cached) != string(first) {
 		t.Error("cache did not serve stale (pre-invalidation) body")
 	}
 
 	idx.InvalidateChannel("dev")
-	fresh, _ := idx.GetSource(context.Background(), "dev")
+	fresh, _, _ := idx.GetSource(context.Background(), "dev", nil, nil)
 	if !strings.Contains(string(fresh), "Package: beta") {
 		t.Errorf("after invalidation, beta missing: %q", fresh)
 	}
@@ -144,15 +144,15 @@ func TestInvalidateChannelScopedPerChannel(t *testing.T) {
 	seedPackage(t, database, "prod", "gamma", "1.0.0", false)
 
 	idx := NewIndex(database.DB)
-	devBefore, _ := idx.GetSource(context.Background(), "dev")
-	prodBefore, _ := idx.GetSource(context.Background(), "prod")
+	devBefore, _, _ := idx.GetSource(context.Background(), "dev", nil, nil)
+	prodBefore, _, _ := idx.GetSource(context.Background(), "prod", nil, nil)
 
 	// Mutate prod, invalidate prod. dev cache must remain.
 	seedPackage(t, database, "prod", "gamma", "2.0.0", false)
 	idx.InvalidateChannel("prod")
 
-	prodAfter, _ := idx.GetSource(context.Background(), "prod")
-	devAfter, _ := idx.GetSource(context.Background(), "dev")
+	prodAfter, _, _ := idx.GetSource(context.Background(), "prod", nil, nil)
+	devAfter, _, _ := idx.GetSource(context.Background(), "dev", nil, nil)
 
 	if string(prodBefore) == string(prodAfter) {
 		t.Error("prod cache not refreshed after invalidation")
@@ -171,17 +171,17 @@ func TestTTLExpiry(t *testing.T) {
 	idx := NewIndex(database.DB)
 	idx.ttl = 10 * time.Millisecond
 
-	first, _ := idx.GetSource(context.Background(), "dev")
+	first, _, _ := idx.GetSource(context.Background(), "dev", nil, nil)
 	seedPackage(t, database, "dev", "beta", "2.0.0", false)
 
 	// Immediately the cache hides beta.
-	cached, _ := idx.GetSource(context.Background(), "dev")
+	cached, _, _ := idx.GetSource(context.Background(), "dev", nil, nil)
 	if string(cached) != string(first) {
 		t.Error("expected stale cache within TTL")
 	}
 
 	time.Sleep(20 * time.Millisecond)
-	fresh, _ := idx.GetSource(context.Background(), "dev")
+	fresh, _, _ := idx.GetSource(context.Background(), "dev", nil, nil)
 	if !strings.Contains(string(fresh), "beta") {
 		t.Errorf("TTL expired but body still stale: %q", fresh)
 	}
@@ -196,7 +196,7 @@ func TestGetBinaryOnlyRowsWithBinariesForCell(t *testing.T) {
 	seedBinary(t, database, alphaID, "ubuntu-22.04-amd64-r-4.4")
 
 	idx := NewIndex(database.DB)
-	body, err := idx.GetBinary(context.Background(), "dev", "ubuntu-22.04-amd64-r-4.4", "4.4")
+	body, _, err := idx.GetBinary(context.Background(), "dev", "ubuntu-22.04-amd64-r-4.4", "4.4", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

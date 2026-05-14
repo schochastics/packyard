@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 // Bundle schemas the importer accepts. v1 is the original source-only
@@ -159,6 +160,16 @@ func (b *BundleImporter) Run(ctx context.Context, path string, progress func(str
 		return nil, fmt.Errorf("resolve bundle path: %w", err)
 	}
 	defer cleanup()
+
+	// Refuse to write into a proxy channel — those materialize on read
+	// from upstream, and a bundle import would create rows that conflict
+	// with future proxy fetches (different bytes for the same version,
+	// or duplicate event rows).
+	if b.Deps.Channels != nil {
+		if ch := b.Deps.Channels.Lookup(b.Channel); ch != nil && ch.Kind == config.KindProxy {
+			return nil, fmt.Errorf("channel %q is a proxy; bundle import is not accepted (proxy channels materialize from upstream)", b.Channel)
+		}
+	}
 
 	manifest, err := readManifest(root)
 	if err != nil {

@@ -39,6 +39,13 @@ func handleDelete(deps Deps) http.HandlerFunc {
 		if !requireScope(w, r, "publish:"+channel) {
 			return
 		}
+		if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
+			writeError(w, r, http.StatusConflict,
+				CodeChannelIsProxy,
+				fmt.Sprintf("channel %q is a proxy; delete is not accepted", channel),
+				"Proxy channels mirror upstream; delete a proxied package by removing the channel itself.")
+			return
+		}
 
 		id, _ := IdentityFromContext(r.Context())
 		resp, herr := persistDelete(r.Context(), deps.DB.DB, channel, name, version, id.Label)

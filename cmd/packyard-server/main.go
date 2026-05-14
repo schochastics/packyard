@@ -258,10 +258,15 @@ func runServe(cfg *config.ServerConfig) error {
 		return fmt.Errorf("ui session key: %w", err)
 	}
 
+	if err := validateUpstreamCells(channels, matrix); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+
 	deps := api.Deps{
 		DB:              database,
 		CAS:             store,
 		Matrix:          matrix,
+		Channels:        channels,
 		Server:          cfg,
 		UISessionKey:    uiKey,
 		UISecureCookies: cfg.TLSEnabled(),
@@ -334,6 +339,25 @@ func loadOrCreateUISessionKey(dataDir string) ([]byte, error) {
 		return nil, fmt.Errorf("write %s: %w", path, err)
 	}
 	return key, nil
+}
+
+// validateUpstreamCells cross-checks proxy channels' binary_urls maps
+// against matrix.yaml. Channel-level validate() doesn't have access to
+// matrix.yaml; this check runs once the two configs are loaded so a
+// typo in a binary cell name surfaces at startup rather than the first
+// request.
+func validateUpstreamCells(channels *config.ChannelsConfig, matrix *config.MatrixConfig) error {
+	for _, ch := range channels.Channels {
+		if ch.Kind != config.KindProxy || ch.Upstream == nil {
+			continue
+		}
+		for cell := range ch.Upstream.BinaryURLs {
+			if matrix == nil || matrix.Lookup(cell) == nil {
+				return fmt.Errorf("channel %q upstream.binary_urls cell %q is not declared in matrix.yaml", ch.Name, cell)
+			}
+		}
+	}
+	return nil
 }
 
 func printReconcile(r config.ReconcileResult) {

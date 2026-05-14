@@ -116,6 +116,13 @@ func handlePublish(deps Deps) http.HandlerFunc {
 		if !requireScope(w, r, "publish:"+channel) {
 			return
 		}
+		if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
+			writeError(w, r, http.StatusConflict,
+				CodeChannelIsProxy,
+				fmt.Sprintf("channel %q is a proxy; publish is not accepted", channel),
+				"Proxy channels materialize content from upstream. Pick a local channel for CI publishes.")
+			return
+		}
 
 		policy, ok, err := lookupChannelPolicy(r.Context(), deps.DB.DB, channel)
 		switch {

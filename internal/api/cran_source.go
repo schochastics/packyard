@@ -12,7 +12,15 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/schochastics/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/upstream"
 )
+
+// errNoUpstreamFetcher fires when a proxy-channel handler runs without
+// an upstream.Fetcher wired up — operator misconfiguration that
+// shouldn't happen in production but is easy to hit in tests.
+var errNoUpstreamFetcher = errors.New("no upstream fetcher configured on Deps")
 
 // handleSourcePackages serves GET /{channel}/src/contrib/PACKAGES.
 // Returns plain text; every access requires read:<channel> unless
@@ -120,10 +128,77 @@ func serveSourceTarball(w http.ResponseWriter, r *http.Request, deps Deps, chann
 	}
 	sum, size, herr := lookupSourceBlob(r.Context(), deps.DB.DB, channel, name, version)
 	if herr != nil {
-		herr.write(w, r)
-		return
+		// Proxy channels translate the local miss into an upstream
+		// fetch. On success we re-query and serve from CAS; on failure
+		// the upstream error replaces the local 404.
+		if herr.status == http.StatusNotFound {
+			if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
+				if herr2 := proxyFetchSourceTarball(r.Context(), deps, meta, name, version); herr2 != nil {
+					herr2.write(w, r)
+					return
+				}
+				sum, size, herr = lookupSourceBlob(r.Context(), deps.DB.DB, channel, name, version)
+			}
+		}
+		if herr != nil {
+			herr.write(w, r)
+			return
+		}
 	}
 	serveBlob(w, r, deps, sum, size, "application/x-gzip")
+}
+
+// proxyFetchSourceTarball fetches <name>_<version>.tar.gz from the
+// proxy channel's upstream, writes it into CAS, and materializes a
+// source-only package row plus an audit event. Subsequent reads hit
+// the local CAS and skip this path entirely.
+func proxyFetchSourceTarball(ctx context.Context, deps Deps, meta *channelMeta, name, version string) *httpError {
+	if deps.Upstream == nil {
+		return internalErr("proxy fetch", errNoUpstreamFetcher)
+	}
+	filename := fmt.Sprintf("%s_%s.tar.gz", name, version)
+	blob, err := deps.Upstream.FetchTarball(ctx, meta.Upstream.SourceURL, filename,
+		meta.Upstream.TarballMaxSize, meta.Upstream.Timeout)
+	if err != nil {
+		if upstream.NotFound(err) {
+			return &httpError{
+				status: http.StatusNotFound,
+				code:   CodeNotFound,
+				msg:    fmt.Sprintf("%s@%s not available upstream of channel %s", name, version, meta.Name),
+			}
+		}
+		if deps.Metrics != nil {
+			deps.Metrics.ProxyFetchTotal.WithLabelValues(meta.Name, "source", "upstream_error").Inc()
+		}
+		return &httpError{
+			status: http.StatusBadGateway,
+			code:   CodeUnavailable,
+			msg:    "upstream tarball fetch failed",
+			hint:   err.Error(),
+		}
+	}
+	if _, err := deps.Store.Materialize(ctx, store.Input{
+		Channel: meta.Name,
+		Name:    name,
+		Version: version,
+		Policy:  meta.Policy,
+		Source:  blob,
+		Actor:   "proxy:" + meta.Upstream.SourceURL,
+	}); err != nil {
+		return internalErr("materialize proxy tarball", err)
+	}
+	if deps.Metrics != nil {
+		deps.Metrics.ProxyFetchTotal.WithLabelValues(meta.Name, "source", "ok").Inc()
+	}
+	// Audit event. Best-effort: a failure here doesn't undo the row.
+	_, _ = deps.DB.ExecContext(ctx, `
+		INSERT INTO events(type, channel, package, version, note)
+		VALUES ('proxy_tarball_fetch', ?, ?, ?, ?)
+	`, meta.Name, name, version, "upstream="+meta.Upstream.SourceURL)
+	if deps.Index != nil {
+		deps.Index.InvalidateChannel(meta.Name)
+	}
+	return nil
 }
 
 // resolveDefaultChannel returns the name of the default channel, or a
@@ -237,9 +312,34 @@ func loadSourcePackages(ctx context.Context, deps Deps, channel string) ([]byte,
 			msg:    fmt.Sprintf("channel %q not found", channel),
 		}
 	}
-	body, err := deps.Index.GetSource(ctx, channel)
+	meta := lookupChannelMeta(ctx, deps, channel)
+	body, stale, err := deps.Index.GetSource(ctx, channel, meta, deps.Upstream)
 	if err != nil {
+		// Proxy channel where upstream failed and no stale cache was
+		// available: 503 so clients distinguish "we tried and
+		// upstream is broken" from "channel doesn't exist".
+		if meta.IsProxy() {
+			return nil, &httpError{
+				status: http.StatusServiceUnavailable,
+				code:   CodeUnavailable,
+				msg:    "upstream PACKAGES fetch failed",
+				hint:   err.Error(),
+			}
+		}
 		return nil, internalErr("build packages", err)
+	}
+	if stale {
+		// Best-effort audit annotation; ignoring errors here keeps the
+		// happy path simple and the event row purely advisory.
+		_, _ = deps.DB.ExecContext(ctx, `
+			INSERT INTO events(type, channel, note)
+			VALUES ('proxy_index_stale_served', ?, 'source PACKAGES upstream unreachable')
+		`, channel)
+		if deps.Metrics != nil {
+			deps.Metrics.ProxyFetchTotal.WithLabelValues(channel, "index", "stale").Inc()
+		}
+	} else if meta.IsProxy() && deps.Metrics != nil {
+		deps.Metrics.ProxyFetchTotal.WithLabelValues(channel, "index", "ok").Inc()
 	}
 	return body, nil
 }

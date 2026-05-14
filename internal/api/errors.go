@@ -23,6 +23,7 @@ const (
 	CodeConflict          = "conflict"
 	CodeVersionImmutable  = "version_immutable"
 	CodeChannelImmutable  = "channel_immutable"
+	CodeChannelIsProxy    = "channel_is_proxy"
 	CodeInternal          = "internal_error"
 	CodeUnavailable       = "unavailable"
 	CodePayloadTooLarge   = "payload_too_large"

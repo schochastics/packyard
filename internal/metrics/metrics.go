@@ -36,6 +36,11 @@ type Metrics struct {
 	DeleteTotal  *prometheus.CounterVec // labels: channel
 	CASBytes     prometheus.Gauge
 
+	// Proxy fetches — see internal/upstream + internal/api for emit
+	// sites. Both labels are low-cardinality (channels.yaml is operator
+	// controlled; kind is a 2-value enum; result is a small enum).
+	ProxyFetchTotal *prometheus.CounterVec // labels: channel, kind (source|binary|index), result (ok|stale|upstream_error)
+
 	// Token admin.
 	TokenCreateTotal prometheus.Counter
 	TokenRevokeTotal prometheus.Counter
@@ -108,6 +113,17 @@ func New() *Metrics {
 					"A precise on-disk figure lands with admin gc in B7.",
 			},
 		),
+		ProxyFetchTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: "packyard",
+				Name:      "proxy_fetch_total",
+				Help: "Proxy-channel fetches by channel, kind (source/binary/index), and outcome. " +
+					"`result=ok` covers both upstream hits and locally-cached serves; " +
+					"`stale` is a stale-while-error PACKAGES serve; " +
+					"`upstream_error` is a hard failure surfaced to the client.",
+			},
+			[]string{"channel", "kind", "result"},
+		),
 		TokenCreateTotal: prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Namespace: "packyard",
@@ -131,6 +147,7 @@ func New() *Metrics {
 		m.YankTotal,
 		m.DeleteTotal,
 		m.CASBytes,
+		m.ProxyFetchTotal,
 		m.TokenCreateTotal,
 		m.TokenRevokeTotal,
 	)

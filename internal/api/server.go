@@ -10,6 +10,7 @@ import (
 	"github.com/schochastics/packyard/internal/metrics"
 	"github.com/schochastics/packyard/internal/store"
 	"github.com/schochastics/packyard/internal/ui"
+	"github.com/schochastics/packyard/internal/upstream"
 )
 
 // Deps is the set of services API handlers reach for. Assembled once at
@@ -19,12 +20,14 @@ type Deps struct {
 	DB              *db.DB
 	CAS             *cas.Store
 	Matrix          *config.MatrixConfig
+	Channels        *config.ChannelsConfig // optional in tests; required for proxy channels
 	Server          *config.ServerConfig
-	Index           *Index           // optional; NewMux fills in if nil
-	Metrics         *metrics.Metrics // optional; NewMux fills in if nil
-	Store           *store.Service   // optional; NewMux fills in if nil
-	UISessionKey    []byte           // HMAC key for /ui/ session cookies; empty disables the UI
-	UISecureCookies bool             // mark /ui/ cookies Secure (production)
+	Index           *Index            // optional; NewMux fills in if nil
+	Metrics         *metrics.Metrics  // optional; NewMux fills in if nil
+	Store           *store.Service    // optional; NewMux fills in if nil
+	Upstream        *upstream.Fetcher // optional; NewMux fills in if nil (proxy channels need it)
+	UISessionKey    []byte            // HMAC key for /ui/ session cookies; empty disables the UI
+	UISecureCookies bool              // mark /ui/ cookies Secure (production)
 }
 
 // NewMux builds the top-level HTTP handler: the http.ServeMux of
@@ -54,6 +57,9 @@ func NewMux(deps Deps) http.Handler {
 	}
 	if deps.Store == nil {
 		deps.Store = store.New(deps.DB.DB, deps.CAS)
+	}
+	if deps.Upstream == nil {
+		deps.Upstream = upstream.New(nil, deps.Store)
 	}
 
 	mux := http.NewServeMux()

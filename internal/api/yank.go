@@ -45,6 +45,13 @@ func handleYank(deps Deps) http.HandlerFunc {
 		if !requireScope(w, r, "yank:"+channel) {
 			return
 		}
+		if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
+			writeError(w, r, http.StatusConflict,
+				CodeChannelIsProxy,
+				fmt.Sprintf("channel %q is a proxy; yank is not accepted", channel),
+				"Proxy channels mirror upstream; yank an upstream version at the upstream itself.")
+			return
+		}
 
 		req, herr := decodeYankRequest(r.Body)
 		if herr != nil {
