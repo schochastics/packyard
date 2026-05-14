@@ -118,6 +118,7 @@ The binary is a single static executable; no C runtime required.
 | [admin.md](docs/admin.md) | `packyard-server admin …` commands. |
 | [backup-restore.md](docs/backup-restore.md) | Snapshots, rsync cadence, and restore verification. |
 | [airgap.md](docs/airgap.md) | Air-gap deploy + CRAN bundle import (v1.x — bundler + importer shipped). |
+| [proxy.md](docs/proxy.md) | Lazy proxy channels — single-URL setup, snapshot pinning, per-cell binaries. |
 | [migration.md](docs/migration.md) | Moving from drat or git to packyard. |
 | [design.md](design.md) | Architecture and scope. |
 | [implementation.md](implementation.md) | Phased build plan and status. |
@@ -138,6 +139,12 @@ The OpenAPI spec is also served at `/api/v1/openapi.json` (and
 - Admin CLI: import (drat, git), channels/cells list, gc, reindex.
 - Prometheus metrics + structured access logs.
 - Reference CI workflow for GitHub Actions + Gitea Actions.
+- **Lazy proxy channels** (Verdaccio-style uplinks). Configure a
+  channel with `kind: proxy` + `upstream.source_url` and packyard
+  fetches public packages from upstream on demand, caches them
+  content-addressed, and serves subsequent requests locally. Per-cell
+  binary URLs let proxy channels serve precompiled tarballs too.
+  See [docs/proxy.md](docs/proxy.md).
 
 ### v1.x
 

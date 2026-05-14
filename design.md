@@ -991,3 +991,176 @@ Each active item expands into its own section as we iterate.
 - Being a general-purpose artifact repository (only R packages).
 - Requiring Docker, Postgres, Redis, object storage, or a metrics stack on the host.
 - Managed SaaS.
+
+---
+
+## 15. Lazy proxy channels (v1.2)
+
+The online counterpart to §10's air-gap bundle path. A channel with
+`kind: proxy` materialises packages from an upstream CRAN-protocol
+server (CRAN cloud, PPM, r-universe) on read instead of accepting
+explicit publishes. Verdaccio's "uplinks" model.
+
+Operator playbook: [docs/proxy.md](docs/proxy.md). The notes below
+are the design rationale and the seams that future work plugs into.
+
+### 15.1 Why on-read, why composable with §10
+
+The two paths solve adjacent problems:
+
+| Problem | Path |
+|---|---|
+| "We want a single URL for internal + public packages." | §15 proxy channel. |
+| "We have no internet at all." | §10 bundle import. |
+| "We want both: lazy cache when online, frozen snapshot for audit." | One server, two channels — see [docs/proxy.md](../docs/proxy.md). |
+
+Both ultimately materialise external packages into the same
+`channels`/`packages`/`binaries`/`events`/CAS schema. The proxy path
+triggers the same writes at read time; bundle import triggers them
+in bulk from a manifest. A future server-side build farm (also on
+the v1.x roadmap) is the third trigger: the schema doesn't care
+where the bytes came from.
+
+### 15.2 Schema
+
+Migration `002_channel_kinds.sql` adds two columns to `channels`:
+
+```sql
+ALTER TABLE channels ADD COLUMN kind TEXT NOT NULL DEFAULT 'local'
+  CHECK (kind IN ('local','proxy'));
+ALTER TABLE channels ADD COLUMN upstream_url TEXT;
+```
+
+The `kind='proxy' → upstream_url NOT NULL` invariant is enforced at
+the application layer in `ChannelsConfig.validate()` and at reconcile
+time. SQLite's `ALTER TABLE ADD COLUMN` can't express it as a
+cross-column CHECK without recreating the table.
+
+### 15.3 Package layout
+
+Three packages own the pieces, with a deliberate dependency direction:
+
+```
+internal/upstream  --depends-on-->  internal/store  <--depends-on--  internal/api
+                                                                ^
+                                                                |
+                                                       internal/api
+                                                       (handlers,
+                                                        Index, ...)
+```
+
+- `internal/store` owns the package-materialisation primitive
+  (`Service.Materialize`, `Service.AttachBinary`). Both HTTP publish
+  and proxy fetch call into it; the api package no longer owns
+  `persistPublish` directly.
+- `internal/upstream` is the outbound-HTTP client (`Fetcher`). It
+  GETs from upstream, streams to CAS via `store.Service`, returns a
+  `BlobRef`. Singleflight collapses concurrent identical fetches;
+  size limits are enforced with `io.LimitReader` *before* the CAS
+  write so a hostile upstream can't bomb the tempfile area.
+- `internal/api` consumes both. The CRAN read handlers in
+  `cran_source.go` / `cran_binary.go` resolve a `channelMeta` per
+  request and, on a tarball miss for a proxy channel, call
+  `upstream.Fetcher` + `store.Service` to materialise the row before
+  serving.
+
+This pulls `persistPublish` out of `internal/api` — a strictly
+behaviour-preserving refactor that shipped as a separate commit
+ahead of the proxy feature.
+
+### 15.4 PACKAGES caching
+
+The existing `api.Index` was already a TTL'd in-memory cache for
+PACKAGES bodies built from DB queries. For proxy channels it now
+serves a different role: cache for upstream-fetched bytes.
+
+The shape changes slightly. Each `indexEntry` still carries
+`(body, expires)`, but the proxy path:
+
+- Reads with `peek` (returns the entry even when expired) instead of
+  `lookup` (which evicts on expiry).
+- On fresh hit: returns the body, no upstream call.
+- On expiry: tries an upstream refresh; on success replaces the
+  entry, on failure returns the stale body and surfaces a
+  `stale=true` flag that the handler turns into a
+  `proxy_index_stale_served` event row + a `stale` metric label.
+
+This is "stale-while-error" — three lines that keep the channel
+serving during transient upstream blips, which Verdaccio's `max_fails`
+/ `fail_timeout` knobs build a more elaborate version of. v1 takes
+the simplest workable shape.
+
+### 15.5 Tarball miss path
+
+When `lookupSourceBlob` / `lookupBinaryBlob` returns `sql.ErrNoRows`:
+
+1. Resolve the channel's `channelMeta`. If not a proxy, return the
+   existing 404.
+2. For source tarballs: call `Fetcher.FetchTarball(SourceURL, ...)`
+   → `Service.Materialize` (creates the packages row) → emit
+   `proxy_tarball_fetch` event → invalidate the Index entry → retry
+   the local lookup → `serveBlob`.
+3. For binary tarballs: the cell must appear in
+   `upstream.binary_urls`. If not, 404. Otherwise the binary requires
+   a source row, so packyard fetches source first if missing
+   (`proxyFetchSourceTarball`) before fetching the cell's binary and
+   calling `Service.AttachBinary`. Two upstream round-trips on cold
+   cache, one on warm.
+
+Subsequent reads hit the local CAS and `lookupSourceBlob` /
+`lookupBinaryBlob` succeeds normally — the proxy code path is
+entirely bypassed.
+
+### 15.6 Write guards
+
+`POST /api/v1/packages/{ch}/...`, the yank endpoint, the delete
+endpoint, and the bundle importer all check `channelMeta.IsProxy()`
+early and return `409 channel_is_proxy` if the channel mirrors
+upstream. Proxy channels are read-only from the operator's POV.
+
+### 15.7 Footgun rejection
+
+The default channel cannot be `kind: proxy`. Combined with
+`AllowAnonymousReads: true`, the default-channel-proxy combination
+would turn packyard into an unauthenticated cache-fill relay for the
+public internet. `ChannelsConfig.validate()` refuses to load the
+config in that case; there is no flag to override it.
+
+### 15.8 Pinning
+
+There is no separate `pin` config field. To pin a proxy channel to a
+snapshot, the operator pastes the dated upstream URL directly:
+
+```yaml
+upstream:
+  source_url: https://packagemanager.posit.co/cran/2026-01-15
+```
+
+To roll the snapshot forward, edit the URL and restart. The
+reconciler updates the row; the kind change rule still applies
+(`local ↔ proxy` is refused on populated channels) but
+`upstream_url` updates on an existing proxy channel are free.
+
+### 15.9 What this preserves
+
+The channel model, URL layout, scope semantics, CAS, events, and
+metrics are unchanged for local channels. Operators who don't enable
+a proxy channel see no behaviour change beyond two new nullable
+columns on `channels` and a new (always-zero) counter family.
+
+### 15.10 Deferred follow-ups
+
+- **Local overlay on proxy channels** (private package shadowing a
+  public one). Verdaccio supports this; packyard refuses local
+  writes on proxy channels in v1.2. Useful next step but a separate
+  design conversation.
+- **Eager warm-up** (`admin proxy prefetch <pkg-list>`). Cheap to add
+  once we see real operational telemetry on what teams actually want
+  warmed.
+- **Local yank of upstream packages** for security blocking. Today
+  the only way to "block" an upstream package is to remove its
+  channel.
+- **Bioconductor URL shape** (3 sub-repos, per-Bioc-version). v1
+  targets CRAN-shape upstreams only.
+- **Per-token rate limiting** of proxy fetches. Singleflight covers
+  the multi-reader case; rate limits cover the rogue-reader case.
