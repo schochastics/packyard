@@ -602,13 +602,17 @@ func adminImportDrat(cfg *config.ServerConfig, args []string) error {
 	return nil
 }
 
-// adminImportBundle imports a packyard-bundle/1 bundle (directory or
-// .tar.gz) into the named channel. The channel must already exist; we
-// don't auto-create it because channels.yaml is the source of truth
-// for overwrite policy and an air-gap snapshot must be immutable.
+// adminImportBundle imports a packyard-bundle/{1,2} bundle (directory
+// or .tar.gz) into the named channel. The channel must already exist;
+// we don't auto-create it because channels.yaml is the source of truth
+// for overwrite policy. Each package goes through the store like a
+// publish, so the channel's own policy applies: on an immutable
+// channel a version already present with different bytes fails, on a
+// mutable one it is overwritten. Air-gap snapshots belong in immutable
+// channels; migrations may target any channel.
 func adminImportBundle(cfg *config.ServerConfig, args []string) error {
 	fs := flag.NewFlagSet("admin import bundle", flag.ContinueOnError)
-	channel := fs.String("channel", "", "target packyard channel (required, must exist with immutable policy)")
+	channel := fs.String("channel", "", "target packyard channel (required, must exist; its overwrite policy applies)")
 	if err := fs.Parse(reorderFlagsFirst(args)); err != nil {
 		return err
 	}

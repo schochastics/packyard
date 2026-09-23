@@ -166,6 +166,16 @@ else
   cat "$LOG"; failed+=("11 backfill")
 fi
 
+# 12. Migration export: examples/bundler/s3-cranlike-to-bundle.R turns
+# prod (the same layout as an S3 CRAN-like repo) into a source bundle;
+# run.sh imports it into dev. R 4.5 for tools::sha256sum.
+echo "--- 12 s3-cranlike-to-bundle"
+rm -rf /out/bundle
+if ! "$R45" /bundler/s3-cranlike-to-bundle.R --repo "$SRC" --out /out/bundle >"$LOG" 2>&1 ||
+  ! grep -q "wrote 3 tarballs" "$LOG"; then
+  cat "$LOG"; failed+=("12 s3-cranlike-to-bundle")
+fi
+
 if [ ${#failed[@]} -gt 0 ]; then
   printf '==> [%s] FAILED:\n' "$E2E_DISTRO"; printf '    %s\n' "${failed[@]}"
   exit 1

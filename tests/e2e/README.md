@@ -37,6 +37,9 @@ allows anonymous reads and `dev` doesn't, then runs
   10. `dev` refuses anonymous reads.
   11. [packyard-backfill.sh](../../examples/ci/packyard-backfill.sh)
       fills `r-4.5`, after which R 4.5 gets a binary.
+  12. [s3-cranlike-to-bundle.R](../../examples/bundler/s3-cranlike-to-bundle.R)
+      exports `prod`, current and archived versions, as a bundle, and
+      `admin import bundle` loads it into `dev`.
 
 Server logs and the User-Agent strings the clients sent land in
 `tests/e2e/out/<distro>/` (git-ignored).

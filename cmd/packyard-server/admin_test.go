@@ -485,3 +485,74 @@ func captureStdout(t *testing.T, fn func() error) string {
 	}
 	return string(out)
 }
+
+// TestAdminImportBundleFollowsChannelPolicy pins that bundle import
+// obeys the target channel's overwrite policy: re-importing identical
+// bytes is a no-op everywhere, different bytes for an existing version
+// fail on immutable channels and overwrite on mutable ones.
+func TestAdminImportBundleFollowsChannelPolicy(t *testing.T) {
+	for _, policy := range []string{"immutable", "mutable"} {
+		t.Run(policy, func(t *testing.T) {
+			dataDir := t.TempDir()
+			cfg := config.DefaultServerConfig()
+			cfg.DataDir = dataDir
+			ctx := context.Background()
+			database, err := db.Open(ctx, filepath.Join(dataDir, "db.sqlite"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.MigrateEmbedded(ctx, database); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := database.ExecContext(ctx,
+				`INSERT INTO channels(name, overwrite_policy) VALUES ('target', ?)`, policy); err != nil {
+				t.Fatal(err)
+			}
+			_ = database.Close()
+
+			bundle := func(body string) string {
+				dir := t.TempDir()
+				writeSourceBundle(t, dir, map[string]string{"foo_1.0.0.tar.gz": body, "bar_2.0.0.tar.gz": "bar"})
+				return dir
+			}
+			importBundle := func(path string) (string, error) {
+				var runErr error
+				out := captureStdout(t, func() error {
+					runErr = adminImportBundle(&cfg, []string{"-channel", "target", path})
+					return nil
+				})
+				return out, runErr
+			}
+
+			if _, err := importBundle(bundle("first")); err != nil {
+				t.Fatalf("first import: %v", err)
+			}
+			if out, err := importBundle(bundle("first")); err != nil || !strings.Contains(out, "failed=0") {
+				t.Errorf("identical re-import: err=%v\n%s", err, out)
+			}
+
+			_, err = importBundle(bundle("second"))
+			database, _ = db.Open(ctx, filepath.Join(dataDir, "db.sqlite"))
+			defer func() { _ = database.Close() }()
+			var sum string
+			_ = database.QueryRowContext(ctx,
+				`SELECT source_sha256 FROM packages WHERE channel = 'target' AND name = 'foo'`).Scan(&sum)
+			switch policy {
+			case "immutable":
+				if err == nil {
+					t.Error("different bytes for an existing version imported into an immutable channel")
+				}
+				if sum != sha256Sum("first") {
+					t.Error("immutable channel content changed")
+				}
+			case "mutable":
+				if err != nil {
+					t.Errorf("mutable re-import failed: %v", err)
+				}
+				if sum != sha256Sum("second") {
+					t.Error("mutable channel was not overwritten")
+				}
+			}
+		})
+	}
+}

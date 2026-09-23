@@ -94,7 +94,20 @@ EOF
   docker run --rm --network "$name" \
     -e E2E_DISTRO="$distro" -e PACKYARD_TOKEN="$token" \
     -v "$E2E:/e2e:ro" -v "$ROOT/examples/ci:/ci:ro" \
+    -v "$ROOT/examples/bundler:/bundler:ro" -v "$out:/out" \
     "packyard-e2e-client:$distro" bash /e2e/scenarios.sh || status=$?
+
+  # 12, server side: import the exported bundle into dev.
+  if [ -f "$out/bundle/manifest.json" ]; then
+    echo "--- 12 import bundle into dev"
+    docker cp "$out/bundle" "$name:/tmp/bundle"
+    if ! docker exec "$name" packyard-server admin -data /data import bundle /tmp/bundle -channel dev |
+      tee "$out/bundle-import.log" | grep -q "imported=3 skipped=0 failed=0"; then
+      cat "$out/bundle-import.log"
+      echo "==> [$distro] FAILED: 12 import bundle"
+      status=1
+    fi
+  fi
 
   docker logs "$name" 2>&1 |
     sed -n 's/.*"user_agent":"\([^"]*\)".*/\1/p' |
