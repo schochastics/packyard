@@ -1,0 +1,32 @@
+# Nightly fuzzing of the publish multipart parser. Runs on the
+# Woodpecker cron named "fuzz" (repo settings → Cron) and on demand.
+
+when:
+  - event: cron
+    cron: fuzz
+  - event: manual
+
+matrix:
+  TARGET:
+    - FuzzPublishManifest
+    - FuzzPublishMultipartBody
+
+steps:
+  fuzz:
+    image: golang:1.25
+    commands:
+      - go test -run '^$' -fuzz '^${TARGET}$' -fuzztime 2m ./internal/api/
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            memory: 1000Mi
+            cpu: 1000m
+          limits:
+            memory: 2000Mi
+        nodeSelector:
+          CI: "woodpecker"
+        tolerations:
+          - key: "CI"
+            operator: "Exists"
+            effect: "NoSchedule"

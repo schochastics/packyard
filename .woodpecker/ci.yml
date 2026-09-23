@@ -1,0 +1,60 @@
+# CI: vet, race tests, lint, OpenAPI lint and a build smoke test on
+# every push to main, every pull request, and on demand.
+#
+# The four checks run in parallel (depends_on: []). make e2e needs a
+# Docker daemon, which the Kubernetes runners don't have; run it on a
+# Docker host before tagging (tests/e2e/README.md).
+
+when:
+  - event: push
+    branch: main
+  - event: pull_request
+  - event: manual
+
+steps:
+  test:
+    image: golang:1.25
+    depends_on: []
+    commands:
+      - go mod tidy
+      - git diff --exit-code -- go.mod go.sum || { echo "go.mod/go.sum not tidy; run 'go mod tidy'"; exit 1; }
+      - go vet ./...
+      - go test -race -count=1 ./...
+    backend_options: &resources
+      kubernetes:
+        resources:
+          requests:
+            memory: 1000Mi
+            cpu: 1000m
+          limits:
+            memory: 2000Mi
+        nodeSelector:
+          CI: "woodpecker"
+        tolerations:
+          - key: "CI"
+            operator: "Exists"
+            effect: "NoSchedule"
+
+  lint:
+    image: golangci/golangci-lint:v2.5.0
+    depends_on: []
+    commands:
+      - golangci-lint run ./...
+    backend_options: *resources
+
+  openapi-lint:
+    image: golang:1.25
+    depends_on: []
+    commands:
+      - go install github.com/daveshanley/vacuum@latest
+      # Errors gate; stylistic warnings are tracked separately.
+      - vacuum lint --errors openapi/openapi.yaml
+    backend_options: *resources
+
+  build:
+    image: golang:1.25
+    depends_on: []
+    commands:
+      - make build
+      - ./packyard-server -version
+    backend_options: *resources

@@ -37,7 +37,7 @@ Archived versions are served from `Archive/` and listed in
 
 ```sh
 docker run --rm -d --name packyard -p 8080:8080 -v packyard-data:/data \
-  ghcr.io/schochastics/packyard:latest
+  gitea.cynkra.com/david.schoch/packyard:latest
 ```
 
 Full walkthrough (Docker → admin token → publish → install from R):
@@ -102,24 +102,25 @@ relationship (PPM is the right answer), individual users (use
 
 ```sh
 docker run --rm -d --name packyard -p 8080:8080 -v packyard-data:/data \
-  ghcr.io/schochastics/packyard:latest
+  gitea.cynkra.com/david.schoch/packyard:latest
 ```
 
-Images are published for each tagged release. The container initialises
-on first start (creates DB, CAS, default configs) and runs as a
-non-root user.
+Images for linux/amd64 and linux/arm64 are published to the Gitea
+container registry on every tagged release. The registry is private,
+so log in first (`docker login gitea.cynkra.com`, with a Gitea access
+token that has `read:package`). The container initialises on first
+start (creates DB, CAS, default configs) and runs as a non-root user
+(uid 65532).
 
-**Tag convention:** the Git tag is `vX.Y.Z`; the GHCR image tag is
-`X.Y.Z` (no `v` prefix — [goreleaser]'s default). Pull
-`ghcr.io/schochastics/packyard:1.0.1`, not `:v1.0.1`. `:latest`
-tracks the most recent release.
-
-[goreleaser]: https://goreleaser.com/
+**Tag convention:** the Git tag is `vX.Y.Z`; the image tag is `X.Y.Z`
+(no `v` prefix). Pull `gitea.cynkra.com/david.schoch/packyard:1.3.0`,
+not `:v1.3.0`. `:latest` tracks the most recent release.
 
 ### Binary
 
-Download the matching tarball from
-[GitHub releases](https://github.com/schochastics/packyard/releases), or:
+Download the tarball for your platform from the
+[Gitea releases](https://gitea.cynkra.com/david.schoch/packyard/releases)
+page (each release has `checksums.txt` and SBOMs), or:
 
 ```sh
 # The repo is private: tell Go to skip the public proxy and use your git credentials.
@@ -196,13 +197,51 @@ The OpenAPI spec is also served at `/api/v1/openapi.json` (and
 - Managed SaaS.
 - Public-mirror-scale throughput.
 
+## Development
+
+```sh
+make check   # vet + lint + race tests + OpenAPI lint
+make e2e     # real R clients against a live server (needs Docker)
+```
+
+CI runs on Woodpecker ([.woodpecker/](.woodpecker/)):
+
+| Pipeline | Trigger | What it does |
+|---|---|---|
+| [ci.yml](.woodpecker/ci.yml) | push to `main`, pull requests, manual | `go mod tidy` check, vet, race tests, golangci-lint, OpenAPI lint, build |
+| [release.yml](.woodpecker/release.yml) | tag `v*` | tests, then GoReleaser creates the Gitea release (tarballs, checksums, SBOMs) and buildx pushes the multi-arch image `gitea.cynkra.com/david.schoch/packyard:X.Y.Z` + `:latest` |
+| [fuzz.yml](.woodpecker/fuzz.yml) | cron `fuzz`, manual | 2 min of fuzzing per multipart publish target |
+
+`make e2e` is not in CI: the Kubernetes runners have no Docker daemon.
+
+### Cutting a release
+
+```sh
+make check && make e2e
+git tag -a v1.3.0 -m "packyard v1.3.0"
+git push origin v1.3.0
+```
+
+The release notes are grouped by conventional-commit prefix (`feat:`,
+`fix:`). List breaking changes in the release description.
+
+One-time setup of the repository in Woodpecker:
+
+1. Activate the repository in the Gitea-side Woodpecker.
+2. Add the secret `gitea_token`, a Gitea access token of the
+   repository owner with `write:repository` and `write:package`. It
+   creates the release and is the registry password (username
+   `${CI_REPO_OWNER}`), and it must be available to **tag** events.
+3. Optionally, add a cron named `fuzz` (e.g. daily) for
+   [fuzz.yml](.woodpecker/fuzz.yml).
+
 ## Contributing
 
 Packyard follows a plan-driven workflow: every feature lands as a
 numbered task in [implementation.md](implementation.md) so the scope
 and ordering are visible. Before opening a PR, please skim the design
-and implementation docs for context. Issues and discussions are open
-on GitHub.
+and implementation docs for context. Issues and pull requests live
+on [Gitea](https://gitea.cynkra.com/david.schoch/packyard).
 
 ## License
 

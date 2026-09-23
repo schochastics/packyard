@@ -6,6 +6,7 @@ require (
 	github.com/getkin/kin-openapi v0.135.0
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.23.2
+	golang.org/x/sync v0.20.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.49.1
 )
@@ -32,7 +33,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/woodsbury/decimal128 v1.3.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	modernc.org/libc v1.72.0 // indirect

@@ -12,7 +12,7 @@ docker compose up -d
 
 ## What you get
 
-- Image `ghcr.io/schochastics/packyard:latest` pulled on first run.
+- Image `gitea.cynkra.com/david.schoch/packyard:latest` pulled on first run.
 - Data persisted in the named volume `compose_packyard-data` (SQLite
   catalog + content-addressed blob store + bootstrapped
   `channels.yaml` / `matrix.yaml`).
@@ -96,7 +96,7 @@ the `build:` block in `docker-compose.yml`, then:
 docker compose up -d --build
 ```
 
-Code changes now trigger a rebuild instead of pulling from GHCR.
+Code changes now trigger a rebuild instead of pulling from the registry.
 
 ## Production hardening
 
@@ -184,10 +184,10 @@ packyard.corp {
 
 ### 4. Pin the image tag
 
-Replace `ghcr.io/schochastics/packyard:latest` with a specific
-version tag (e.g. `:1.0.1` — GHCR tags have no `v` prefix; the
-matching Git tag on GitHub does) so a redeploy never surprises
-you with an unintended upgrade.
+Replace `gitea.cynkra.com/david.schoch/packyard:latest` with a specific
+version tag (e.g. `:1.3.0`; image tags have no `v` prefix, the
+matching Git tag does) so a redeploy never surprises you with an
+unintended upgrade.
 
 ### 5. Back up the volume
 

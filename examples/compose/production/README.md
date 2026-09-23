@@ -19,9 +19,9 @@ This folder combines the pieces of a service deployment
 ```sh
 mkdir -p secrets
 # CI's publish token: plaintext on both sides.
-docker run --rm ghcr.io/schochastics/packyard:latest admin token-gen | head -n1 > secrets/ci-publish
+docker run --rm gitea.cynkra.com/david.schoch/packyard:latest admin token-gen | head -n1 > secrets/ci-publish
 # Admin token: the server only gets the hash.
-docker run --rm ghcr.io/schochastics/packyard:latest admin token-gen > admin.txt
+docker run --rm gitea.cynkra.com/david.schoch/packyard:latest admin token-gen > admin.txt
 sed -n 2p admin.txt > secrets/admin.sha256
 sed -n 1p admin.txt   # store this in your password manager, then: rm admin.txt
 chmod 644 secrets/*   # readable by the container's uid 65532

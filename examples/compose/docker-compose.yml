@@ -6,7 +6,7 @@
 
 services:
   packyard:
-    image: ghcr.io/schochastics/packyard:latest
+    image: gitea.cynkra.com/david.schoch/packyard:latest
     # For a local dev loop (rebuild from source on changes), comment out
     # the `image:` line above and uncomment the block below:
     # build:

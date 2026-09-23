@@ -1,8 +1,9 @@
 # End-to-end suite
 
 `make e2e` runs real R clients against a live packyard container.
-Docker is the only requirement; the CI job (`.github/workflows/cran-e2e.yml`)
-just calls the target.
+Docker is the only requirement. It is not part of Woodpecker CI, whose
+Kubernetes runners have no Docker daemon. Run it on a Docker host
+before tagging a release.
 
 ```sh
 make e2e                     # both jobs

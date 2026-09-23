@@ -4,7 +4,10 @@
 # Final image is distroless/static — pure Go binary, no shell, no apk/apt.
 
 # ---- build stage ----
-FROM golang:1.25-alpine AS build
+# Runs on the build host's platform and cross-compiles for the target,
+# so multi-arch builds (buildx --platform linux/amd64,linux/arm64) need
+# no emulation.
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
 
 # git is only needed to resolve git describe during the build, and ca-certificates
 # so go get/mod can speak TLS. Everything else we need is in the base image.
@@ -19,7 +22,9 @@ RUN go mod download
 COPY . .
 
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux go build \
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
     -trimpath \
     -ldflags "-s -w -X gitea.cynkra.com/david.schoch/packyard/internal/version.Version=${VERSION}" \
     -o /out/packyard-server \

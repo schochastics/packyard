@@ -68,23 +68,26 @@ pre-v2 module path installs an incompatible v1.x release.
 
 ## Release cutting
 
-Tag push → GoReleaser → draft release + GHCR image. No manual steps
-between commit and tagged artifact.
+Tag push → Woodpecker [.woodpecker/release.yml](.woodpecker/release.yml)
+→ GoReleaser creates the Gitea release (tarballs, checksums, SBOMs)
+and buildx pushes the multi-arch image to the Gitea registry. No
+manual steps between tag and artifacts.
 
 ```sh
-git tag -a v1.0.X -m "packyard v1.0.X"
-git push origin v1.0.X
-gh run watch    # ~2.5 min
-# Review the draft at github.com/schochastics/packyard/releases
-# Click Publish when ready.
+make check && make e2e      # e2e is not in CI (no Docker on the runners)
+git tag -a v1.3.0 -m "packyard v1.3.0"
+git push origin v1.3.0
+# Watch the pipeline in the Gitea-side Woodpecker; the release appears at
+# gitea.cynkra.com/david.schoch/packyard/releases.
 ```
 
-**Tag convention:** Git tag is `vX.Y.Z`, GHCR image tag is `X.Y.Z`
-(no `v` prefix). This is goreleaser's default `{{ .Version }}`
-behaviour. `ghcr.io/schochastics/packyard:1.0.1` works;
-`:v1.0.1` returns `manifest unknown`.
+**Tag convention:** Git tag is `vX.Y.Z`, image tag is `X.Y.Z` (no `v`
+prefix; `${CI_COMMIT_TAG##v}` in release.yml).
+`gitea.cynkra.com/david.schoch/packyard:1.3.0` works; `:v1.3.0` does
+not. `:latest` is updated on every tag.
 
-`:latest` is updated on every tag.
+The pipeline needs the repo secret `gitea_token` (repo owner's token,
+`write:repository` + `write:package`, enabled for tag events).
 
 ## Repo gotchas worth memorising
 
@@ -92,28 +95,19 @@ behaviour. `ghcr.io/schochastics/packyard:1.0.1` works;
   `origin` points there; the old GitHub repo (now private) is kept as
   the `github` remote. The Go module path is
   `gitea.cynkra.com/david.schoch/packyard`; `go install` / `go get`
-  need `GOPRIVATE=gitea.cynkra.com`. **The release pipeline has not
-  moved yet:** `.github/workflows/`, `.goreleaser.yaml` (GitHub release
-  owner, GHCR image) and the "Release cutting" section above still
-  target GitHub/GHCR.
+  need `GOPRIVATE=gitea.cynkra.com`. CI and releases run on Woodpecker
+  (`.woodpecker/`); there are no GitHub workflows any more.
 
 - **Direct push to `main` is blocked in this environment.** After
   committing, report the commit SHA and wait for the user to push.
-- **GHCR packages default to private on first push.** Once a package
-  is public it stays public; first release requires a one-time flip
-  in the UI under `github.com/users/schochastics/packages/container/packyard/settings`.
 - **`go 1.25.0` is pinned.** `modernc.org/sqlite v1.49.1` requires
   it. Do not bump the `go` directive downward.
 - **IDE spelling warnings on `packyard`, `CRAN`, `organisation`, `renv`,
   `runbook` etc. are noise.** The IDE's spell checker flags
   project-specific vocabulary and British English; ignore them.
-- **`[skip ci]` in a commit message suppresses tag-triggered Release
-  runs too.** Learned the hard way on v1.1.0: a `[skip ci] draft
-  off` commit landed on main, the v1.1.0 tag was created on that
-  commit, and Release never fired even though the tag push itself
-  was delivered. If you want to change a build/release config and
-  then tag, either drop `[skip ci]` or add a follow-up commit
-  without it before tagging.
+- **`[skip ci]` in a commit message suppresses tag-triggered release
+  runs too** (Woodpecker honours it like GitHub did, which bit v1.1.0).
+  Don't tag a `[skip ci]` commit.
 - **Plan mode re-entry:** when re-entering plan mode, read the
   existing plan file first and overwrite if the new task is distinct
   (this is what system reminders already instruct).
@@ -126,15 +120,15 @@ behaviour. `ghcr.io/schochastics/packyard:1.0.1` works;
 - Integration-style tests spin up a real HTTP server via
   `httptest.NewServer` and exercise the on-the-wire surface. Prefer
   them for anything that crosses handler / DB / CAS boundaries.
-- **No fuzz tests in v1.** Multipart publish is the obvious target;
-  committed to v1.1.
+- Fuzz targets for multipart publish live in
+  `internal/api/publish_fuzz_test.go`; `.woodpecker/fuzz.yml` runs them.
 - `internal/metrics` has 0% coverage by design — it's definitions
   plus registrations, exercised transitively by `metrics_*_test.go`
   in `internal/api`.
 - CRAN-protocol compliance is HTTP/byte-level in
   [cran_protocol_test.go](internal/api/cran_protocol_test.go);
-  we do **not** run `Rscript install.packages()` in CI today.
-  Planned for v1.1.
+  real R clients run in `make e2e` ([tests/e2e/](tests/e2e/)), which
+  needs Docker and is therefore run by hand, not in Woodpecker.
 
 ## Memory vs this file
 
