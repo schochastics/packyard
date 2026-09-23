@@ -27,7 +27,7 @@ func FuzzPublishManifest(f *testing.F) {
 	f.Add(seedOK)
 	f.Add([]byte(`{"binaries":null}`))
 	f.Add([]byte(`{}`))
-	f.Add([]byte(`{"binaries":[{"cell":"ubuntu-22.04-amd64-r-4.4","part":"bin1"}]}`))
+	f.Add([]byte(`{"binaries":[{"cell":"r-4.4","part":"bin1"}]}`))
 	f.Add([]byte(`{`))
 	f.Add([]byte(`not json`))
 	f.Add([]byte{})

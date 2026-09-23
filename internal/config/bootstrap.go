@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"embed"
 	"errors"
 	"fmt"
@@ -25,17 +26,31 @@ type BootstrapResult struct {
 	Skipped []string // absolute paths that already existed
 }
 
+// BootstrapOptions customizes the files BootstrapDefaults writes.
+type BootstrapOptions struct {
+	// Distro replaces the default matrix.yaml distro ("jammy"). Empty
+	// keeps the default.
+	Distro string
+}
+
+// defaultDistroLine is the line in defaults/matrix.yaml that
+// BootstrapOptions.Distro rewrites.
+const defaultDistroLine = "\ndistro: jammy\n"
+
 // BootstrapDefaults ensures channels.yaml and matrix.yaml exist under
 // dataDir. Missing files are created from the embedded defaults;
 // existing files are left exactly as they are, regardless of content.
 //
 // Idempotent: running twice against the same data dir is a no-op on
 // the second pass.
-func BootstrapDefaults(dataDir string) (BootstrapResult, error) {
+func BootstrapDefaults(dataDir string, opts BootstrapOptions) (BootstrapResult, error) {
 	var result BootstrapResult
 
 	if dataDir == "" {
 		return result, errors.New("bootstrap: empty data dir")
+	}
+	if opts.Distro != "" && !distroRE.MatchString(opts.Distro) {
+		return result, fmt.Errorf("bootstrap: distro must match %s, got %q", distroRE, opts.Distro)
 	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return result, fmt.Errorf("bootstrap: ensure data dir: %w", err)
@@ -61,6 +76,12 @@ func BootstrapDefaults(dataDir string) (BootstrapResult, error) {
 		body, err := fs.ReadFile(defaultConfigFS, filepath.Join("defaults", e.Name()))
 		if err != nil {
 			return result, fmt.Errorf("bootstrap: read embedded %q: %w", e.Name(), err)
+		}
+		if e.Name() == "matrix.yaml" && opts.Distro != "" {
+			if !bytes.Contains(body, []byte(defaultDistroLine)) {
+				return result, errors.New("bootstrap: embedded matrix.yaml has no default distro line")
+			}
+			body = bytes.Replace(body, []byte(defaultDistroLine), []byte("\ndistro: "+opts.Distro+"\n"), 1)
 		}
 		// 0o644 so operators can read the file without sudo when debugging.
 		// This is a bootstrap helper for config files, not secrets; the

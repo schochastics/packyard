@@ -142,55 +142,56 @@ Scope tokens per team: `publish:team-analytics`, `publish:team-epi`, …
 
 ## `matrix.yaml`
 
-Declares the cells for which publishers may upload binaries. A cell is
-the `(os, os_version, arch, r_minor)` tuple a binary tarball is built
-for. Names are referenced from publish manifests and from the binary-
-read URL (`/bin/linux/{cell}/…`), so keep them short and stable.
-**Renames require re-publishing.**
+Declares which binaries publishers may upload. A deployment serves
+**exactly one Linux distribution**; cells vary only by R minor
+version. List every R minor your Workbench/Connect images install —
+clients on an R version without a cell fall back to source packages.
 
-Default shipped by `packyard-server -init`:
+Default shipped by `packyard-server -init` (`-init -distro rhel9`
+writes `distro: rhel9` instead):
 
 ```yaml
+distro: jammy
+arch: amd64
+default_r_minor: "4.5"
 cells:
-  - { name: ubuntu-24.04-amd64-r-4.5, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.5" }
-  - { name: ubuntu-24.04-arm64-r-4.5, os: linux, os_version: ubuntu-24.04, arch: arm64, r_minor: "4.5" }
-  - { name: ubuntu-24.04-amd64-r-4.4, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.4" }
-  - { name: ubuntu-24.04-arm64-r-4.4, os: linux, os_version: ubuntu-24.04, arch: arm64, r_minor: "4.4" }
+  - { name: r-4.4, r_minor: "4.4" }
+  - { name: r-4.5, r_minor: "4.5" }
+  - { name: r-4.6, r_minor: "4.6" }
 ```
 
 ### Field reference
 
 | Field | Required | Valid values |
 |---|---|---|
-| `name` | yes | `[a-z0-9]([a-z0-9.-]*[a-z0-9])?`, max 127 chars. |
-| `os` | yes | `linux`, `darwin`, `windows` (only `linux` is served over the binary URL in v1). |
-| `os_version` | yes | Free-form label, e.g. `ubuntu-24.04`, `debian-12`, `rhel-9`. |
-| `arch` | yes | `amd64`, `arm64`, `i386`. |
-| `r_minor` | yes | `MAJOR.MINOR` string (`"4.4"`, not `"4.4.1"` — R binaries are minor-version-pinned). Quote it to keep YAML from parsing as a float. |
+| `distro` | yes | Posit Package Manager codename, `[a-z0-9]+`: `jammy`, `noble`, `rhel9`, …. Appears verbatim in client URLs (`/{channel}/__linux__/{distro}/latest`). |
+| `arch` | yes | `amd64`, `arm64`. |
+| `default_r_minor` | yes | The `r_minor` of one of the cells. Used for clients whose User-Agent carries no R version. |
+| `build_image_hint` | no | Free text for CI; the server ignores it. |
+| `cells[].name` | yes | `[a-z0-9]([a-z0-9.-]*[a-z0-9])?`, max 127 chars, unique. Referenced from publish manifests. **Renames require re-publishing.** |
+| `cells[].r_minor` | yes | `MAJOR.MINOR` (`"4.4"`, not `"4.4.1"` — R binaries are minor-version-pinned), unique. Quote it to keep YAML from parsing a float. |
 
 ### Common patterns
 
-**Add a RHEL cell** (cell registered, CI builds against it next push):
+**Add a new R minor** (R 4.7 alongside the existing ones):
 
 ```yaml
 cells:
-  - { name: ubuntu-24.04-amd64-r-4.5, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.5" }
-  - { name: rhel-9-amd64-r-4.5,      os: linux, os_version: rhel-9,       arch: amd64, r_minor: "4.5" }
+  - { name: r-4.6, r_minor: "4.6" }
+  - { name: r-4.7, r_minor: "4.7" }
 ```
 
-**Add a new R minor** (R 4.6 alongside existing 4.5):
+After restarting:
 
-```yaml
-cells:
-  - { name: ubuntu-24.04-amd64-r-4.5, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.5" }
-  - { name: ubuntu-24.04-amd64-r-4.6, os: linux, os_version: ubuntu-24.04, arch: amd64, r_minor: "4.6" }
-```
+- Existing packages have no binary for the new cell; clients on R 4.7
+  get source until binaries are backfilled. `packyard-server admin
+  cells show r-4.7` prints the gap list.
+- Subsequent CI runs that include the cell fill the gap over time.
 
-After committing and restarting:
-
-- Existing packages get zero coverage for the new cell — `packyard-server
-  admin cells show ubuntu-24.04-amd64-r-4.6` prints the gap list.
-- Subsequent CI runs that include the cell will fill the gap over time.
+**Change the distro** (e.g. a client moves from `jammy` to `noble`):
+change `distro`, restart, and rebuild binaries for every cell. Clients
+must switch their repo URLs to the new codename at the same time —
+requests for any other distro return 404.
 
 ### Relationship to the CI workflow
 

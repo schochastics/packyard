@@ -34,11 +34,11 @@ func TestBinaryPACKAGESListsOnlyRowsWithThatCell(t *testing.T) {
 	t.Parallel()
 
 	fx := newPublishFixture(t)
-	publishWithBinary(t, fx, "dev", "alpha", "1.0.0", "ubuntu-22.04-amd64-r-4.4")
+	publishWithBinary(t, fx, "dev", "alpha", "1.0.0", "r-4.4")
 	// beta published source-only (no binary).
 	publishSource(t, fx, "dev", "beta", "1.0.0", []byte("src only"))
 
-	rec := getURL(t, fx, "/dev/bin/linux/ubuntu-22.04-amd64-r-4.4/PACKAGES", fx.token)
+	rec := getURL(t, fx, "/dev/bin/linux/r-4.4/PACKAGES", fx.token)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
@@ -58,7 +58,7 @@ func TestBinaryTarballServesCASBytes(t *testing.T) {
 	t.Parallel()
 
 	fx := newPublishFixture(t)
-	cell := "ubuntu-22.04-amd64-r-4.4"
+	cell := "r-4.4"
 	_, binBody := publishWithBinary(t, fx, "dev", "alpha", "1.0.0", cell)
 
 	rec := getURL(t, fx, "/dev/bin/linux/"+cell+"/alpha_1.0.0.tar.gz", fx.token)
@@ -77,10 +77,10 @@ func TestBinaryTarballUnknownCellReturns404(t *testing.T) {
 	t.Parallel()
 
 	fx := newPublishFixture(t)
-	publishWithBinary(t, fx, "dev", "alpha", "1.0.0", "ubuntu-22.04-amd64-r-4.4")
+	publishWithBinary(t, fx, "dev", "alpha", "1.0.0", "r-4.4")
 
 	// Package has a binary for the amd64 cell, not arm64.
-	rec := getURL(t, fx, "/dev/bin/linux/ubuntu-22.04-arm64-r-4.4/alpha_1.0.0.tar.gz", fx.token)
+	rec := getURL(t, fx, "/dev/bin/linux/r-4.5/alpha_1.0.0.tar.gz", fx.token)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
 	}
@@ -100,13 +100,13 @@ func TestBinaryRoutesHonorReadScope(t *testing.T) {
 	t.Parallel()
 
 	fx := newPublishFixture(t)
-	publishWithBinary(t, fx, "dev", "alpha", "1.0.0", "ubuntu-22.04-amd64-r-4.4")
+	publishWithBinary(t, fx, "dev", "alpha", "1.0.0", "r-4.4")
 
-	rec := getURL(t, fx, "/dev/bin/linux/ubuntu-22.04-amd64-r-4.4/PACKAGES", "")
+	rec := getURL(t, fx, "/dev/bin/linux/r-4.4/PACKAGES", "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("anon PACKAGES: status = %d, want 401", rec.Code)
 	}
-	rec = getURL(t, fx, "/dev/bin/linux/ubuntu-22.04-amd64-r-4.4/alpha_1.0.0.tar.gz", "")
+	rec = getURL(t, fx, "/dev/bin/linux/r-4.4/alpha_1.0.0.tar.gz", "")
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("anon tarball: status = %d, want 401", rec.Code)
 	}

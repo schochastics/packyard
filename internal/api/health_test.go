@@ -35,12 +35,11 @@ func newTestDeps(t *testing.T) api.Deps {
 	}
 
 	matrix, err := config.DecodeMatrix(strings.NewReader(`
+distro: jammy
+arch: amd64
+default_r_minor: "4.4"
 cells:
-  - name: ubuntu-22.04-amd64-r-4.4
-    os: linux
-    os_version: ubuntu-22.04
-    arch: amd64
-    r_minor: "4.4"
+  - { name: r-4.4, r_minor: "4.4" }
 `))
 	if err != nil {
 		t.Fatalf("matrix: %v", err)

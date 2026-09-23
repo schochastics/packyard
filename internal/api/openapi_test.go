@@ -145,7 +145,7 @@ func TestContractListPackagesResponse(t *testing.T) {
 	router := mustRouter(t, doc)
 
 	fx := newPublishFixture(t)
-	publishWithBinary(t, fx, "dev", "alpha", "1.0.0", "ubuntu-22.04-amd64-r-4.4")
+	publishWithBinary(t, fx, "dev", "alpha", "1.0.0", "r-4.4")
 	publishSource(t, fx, "dev", "beta", "1.0.0", []byte("src"))
 
 	ts := httptest.NewServer(fx.mux)

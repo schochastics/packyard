@@ -38,7 +38,7 @@ func TestBootstrapDefaultsWritesMissingFiles(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	result, err := config.BootstrapDefaults(dir)
+	result, err := config.BootstrapDefaults(dir, config.BootstrapOptions{})
 	if err != nil {
 		t.Fatalf("BootstrapDefaults: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestBootstrapDefaultsLeavesCustomisedFilesAlone(t *testing.T) {
 		t.Fatalf("write custom: %v", err)
 	}
 
-	result, err := config.BootstrapDefaults(dir)
+	result, err := config.BootstrapDefaults(dir, config.BootstrapOptions{})
 	if err != nil {
 		t.Fatalf("BootstrapDefaults: %v", err)
 	}
@@ -105,10 +105,10 @@ func TestBootstrapDefaultsIsIdempotent(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	if _, err := config.BootstrapDefaults(dir); err != nil {
+	if _, err := config.BootstrapDefaults(dir, config.BootstrapOptions{}); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	second, err := config.BootstrapDefaults(dir)
+	second, err := config.BootstrapDefaults(dir, config.BootstrapOptions{})
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestBootstrapDefaultsIsIdempotent(t *testing.T) {
 
 func TestBootstrapDefaultsRejectsEmptyDir(t *testing.T) {
 	t.Parallel()
-	if _, err := config.BootstrapDefaults(""); err == nil {
+	if _, err := config.BootstrapDefaults("", config.BootstrapOptions{}); err == nil {
 		t.Fatal("BootstrapDefaults(\"\") succeeded; expected error")
 	}
 }
@@ -134,4 +134,28 @@ func contains(s []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestBootstrapDefaultsDistroOverride(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if _, err := config.BootstrapDefaults(dir, config.BootstrapOptions{Distro: "rhel9"}); err != nil {
+		t.Fatalf("BootstrapDefaults: %v", err)
+	}
+	m, err := config.LoadMatrix(filepath.Join(dir, "matrix.yaml"))
+	if err != nil {
+		t.Fatalf("LoadMatrix: %v", err)
+	}
+	if m.Distro != "rhel9" {
+		t.Errorf("distro = %q, want rhel9", m.Distro)
+	}
+}
+
+func TestBootstrapDefaultsRejectsBadDistro(t *testing.T) {
+	t.Parallel()
+
+	if _, err := config.BootstrapDefaults(t.TempDir(), config.BootstrapOptions{Distro: "Ubuntu 22"}); err == nil {
+		t.Fatal("expected error for invalid distro")
+	}
 }

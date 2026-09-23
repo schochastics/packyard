@@ -147,13 +147,11 @@ func newAttachTestDeps(t *testing.T, channel, policy string) Deps {
 	t.Helper()
 	deps := newImportTestDeps(t, channel, policy)
 	deps.Matrix = &config.MatrixConfig{
+		Distro: "jammy", Arch: "amd64", DefaultRMinor: "4.4",
 		Cells: []config.Cell{
 			{
-				Name:      "rhel9-amd64-r-4.4",
-				OS:        "linux",
-				OSVersion: "rhel9",
-				Arch:      "amd64",
-				RMinor:    "4.4",
+				Name:   "r-4.4",
+				RMinor: "4.4",
 			},
 		},
 	}
@@ -180,10 +178,10 @@ func TestAttachBinariesCreatesBinaryRow(t *testing.T) {
 		Channel: "cran-r4.4-2026q2",
 		Name:    "ggplot2",
 		Version: "3.5.1",
-		Cell:    "rhel9-amd64-r-4.4",
+		Cell:    "r-4.4",
 		Binary:  strings.NewReader("rhel9-binary-bytes"),
 		Actor:   "import-bundle",
-		Note:    "bundle bin/linux/rhel9-amd64-r-4.4/ggplot2_3.5.1.tar.gz",
+		Note:    "bundle bin/linux/r-4.4/ggplot2_3.5.1.tar.gz",
 	})
 	if err != nil {
 		t.Fatalf("AttachBinaries: %v", err)
@@ -191,13 +189,13 @@ func TestAttachBinariesCreatesBinaryRow(t *testing.T) {
 	if resp.AlreadyExisted || resp.Overwritten {
 		t.Errorf("fresh attach should be created; got %+v", resp)
 	}
-	if len(resp.Binaries) != 1 || resp.Binaries[0].Cell != "rhel9-amd64-r-4.4" {
+	if len(resp.Binaries) != 1 || resp.Binaries[0].Cell != "r-4.4" {
 		t.Errorf("response binaries = %+v; want one for rhel9", resp.Binaries)
 	}
 
 	var n int
 	if err := deps.DB.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM binaries WHERE cell = ?`, "rhel9-amd64-r-4.4").Scan(&n); err != nil || n != 1 {
+		`SELECT COUNT(*) FROM binaries WHERE cell = ?`, "r-4.4").Scan(&n); err != nil || n != 1 {
 		t.Fatalf("expected 1 binary row; got %d (err %v)", n, err)
 	}
 
@@ -219,7 +217,7 @@ func TestAttachBinariesSourceRowMissing(t *testing.T) {
 		Channel: "cran-r4.4-2026q2",
 		Name:    "ggplot2",
 		Version: "3.5.1",
-		Cell:    "rhel9-amd64-r-4.4",
+		Cell:    "r-4.4",
 		Binary:  strings.NewReader("x"),
 	})
 	if !errors.Is(err, ErrSourceRowMissing) {
@@ -234,13 +232,13 @@ func TestAttachBinariesIdempotentOnIdenticalBytes(t *testing.T) {
 	body := "binary-bytes"
 	if _, err := AttachBinaries(context.Background(), deps, AttachInput{
 		Channel: "cran-r4.4-2026q2", Name: "ggplot2", Version: "3.5.1",
-		Cell: "rhel9-amd64-r-4.4", Binary: strings.NewReader(body),
+		Cell: "r-4.4", Binary: strings.NewReader(body),
 	}); err != nil {
 		t.Fatalf("first attach: %v", err)
 	}
 	resp, err := AttachBinaries(context.Background(), deps, AttachInput{
 		Channel: "cran-r4.4-2026q2", Name: "ggplot2", Version: "3.5.1",
-		Cell: "rhel9-amd64-r-4.4", Binary: strings.NewReader(body),
+		Cell: "r-4.4", Binary: strings.NewReader(body),
 	})
 	if err != nil {
 		t.Fatalf("second attach: %v", err)
@@ -256,13 +254,13 @@ func TestAttachBinariesImmutableConflictOnDifferentBytes(t *testing.T) {
 
 	if _, err := AttachBinaries(context.Background(), deps, AttachInput{
 		Channel: "cran-r4.4-2026q2", Name: "ggplot2", Version: "3.5.1",
-		Cell: "rhel9-amd64-r-4.4", Binary: strings.NewReader("first"),
+		Cell: "r-4.4", Binary: strings.NewReader("first"),
 	}); err != nil {
 		t.Fatalf("first: %v", err)
 	}
 	_, err := AttachBinaries(context.Background(), deps, AttachInput{
 		Channel: "cran-r4.4-2026q2", Name: "ggplot2", Version: "3.5.1",
-		Cell: "rhel9-amd64-r-4.4", Binary: strings.NewReader("second"),
+		Cell: "r-4.4", Binary: strings.NewReader("second"),
 	})
 	if !errors.Is(err, ErrImmutableConflict) {
 		t.Fatalf("want ErrImmutableConflict; got %v", err)
@@ -275,13 +273,13 @@ func TestAttachBinariesMutableReplace(t *testing.T) {
 
 	if _, err := AttachBinaries(context.Background(), deps, AttachInput{
 		Channel: "dev", Name: "ggplot2", Version: "3.5.1",
-		Cell: "rhel9-amd64-r-4.4", Binary: strings.NewReader("first"),
+		Cell: "r-4.4", Binary: strings.NewReader("first"),
 	}); err != nil {
 		t.Fatalf("first: %v", err)
 	}
 	resp, err := AttachBinaries(context.Background(), deps, AttachInput{
 		Channel: "dev", Name: "ggplot2", Version: "3.5.1",
-		Cell: "rhel9-amd64-r-4.4", Binary: strings.NewReader("second"),
+		Cell: "r-4.4", Binary: strings.NewReader("second"),
 	})
 	if err != nil {
 		t.Fatalf("second: %v", err)
@@ -291,7 +289,7 @@ func TestAttachBinariesMutableReplace(t *testing.T) {
 	}
 	var n int
 	if err := deps.DB.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM binaries WHERE cell = ?`, "rhel9-amd64-r-4.4").Scan(&n); err != nil || n != 1 {
+		`SELECT COUNT(*) FROM binaries WHERE cell = ?`, "r-4.4").Scan(&n); err != nil || n != 1 {
 		t.Errorf("want exactly 1 binary row after replace; got %d (err %v)", n, err)
 	}
 }
@@ -316,7 +314,7 @@ func TestAttachBinariesRejectsNilMatrix(t *testing.T) {
 
 	_, err := AttachBinaries(context.Background(), deps, AttachInput{
 		Channel: "dev", Name: "ggplot2", Version: "3.5.1",
-		Cell: "rhel9-amd64-r-4.4", Binary: strings.NewReader("x"),
+		Cell: "r-4.4", Binary: strings.NewReader("x"),
 	})
 	if err == nil || !strings.Contains(err.Error(), "no matrix config") {
 		t.Errorf("want no-matrix-config error; got %v", err)

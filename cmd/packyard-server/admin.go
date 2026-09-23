@@ -416,17 +416,17 @@ func adminCellsList(cfg *config.ServerConfig) error {
 		return err
 	}
 
+	fmt.Printf("distro %s (%s), default R %s\n\n", deps.Matrix.Distro, deps.Matrix.Arch, deps.Matrix.DefaultRMinor)
 	tw := newTabWriter()
-	fmt.Fprintln(tw, "CELL\tOS\tARCH\tR\tBINARIES\tCOVERAGE\tSIZE")
+	fmt.Fprintln(tw, "CELL\tR\tBINARIES\tCOVERAGE\tSIZE")
 	for _, c := range deps.Matrix.Cells {
 		a := agg[c.Name]
 		coverage := "—"
 		if total > 0 {
 			coverage = fmt.Sprintf("%d/%d", a.PkgCount, total)
 		}
-		fmt.Fprintf(tw, "%s\t%s %s\t%s\t%s\t%d\t%s\t%s\n",
-			c.Name, c.OS, c.OSVersion, c.Arch, c.RMinor,
-			a.BinCount, coverage, humanBytes(a.Bytes))
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n",
+			c.Name, c.RMinor, a.BinCount, coverage, humanBytes(a.Bytes))
 	}
 	return tw.Flush()
 }
@@ -455,8 +455,8 @@ func adminCellsShow(cfg *config.ServerConfig, args []string) error {
 		return fmt.Errorf("cell %q not declared in matrix.yaml", cellName)
 	}
 
-	fmt.Printf("cell %s\n  os     %s %s\n  arch   %s\n  r      %s\n\n",
-		cell.Name, cell.OS, cell.OSVersion, cell.Arch, cell.RMinor)
+	fmt.Printf("cell %s\n  distro %s\n  arch   %s\n  r      %s\n\n",
+		cell.Name, deps.Matrix.Distro, deps.Matrix.Arch, cell.RMinor)
 
 	// Packages missing a binary for this cell. A LEFT JOIN + NULL filter
 	// keeps this to one query.

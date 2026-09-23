@@ -129,17 +129,17 @@ func TestVerifyBlobsReportsMissing(t *testing.T) {
 func TestAdminImportBundleSourceThenBinary(t *testing.T) {
 	const (
 		channelName = "cran-r4.4-test"
-		cell        = "rhel9-amd64-r-4.4"
+		cell        = "r-4.4"
 	)
 
 	dataDir := t.TempDir()
 
 	// Seed matrix.yaml with the cell we'll import binaries for.
-	matrixYAML := []byte(`cells:
+	matrixYAML := []byte(`distro: rhel9
+arch: amd64
+default_r_minor: "4.4"
+cells:
   - name: ` + cell + `
-    os: linux
-    os_version: rhel9
-    arch: amd64
     r_minor: "4.4"
 `)
 	if err := os.WriteFile(filepath.Join(dataDir, "matrix.yaml"), matrixYAML, 0o644); err != nil {

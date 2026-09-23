@@ -1,39 +1,24 @@
-# packyard binary matrix — the cells for which publishers may upload binaries.
+# packyard binary matrix — which binaries publishers may upload.
 #
-# Each cell is a (os, os_version, arch, r_minor) combination. The name is
-# what appears in manifest files and URL paths, so pick short, stable
-# identifiers. Renames require repushing binaries under the new name.
+# A deployment serves exactly ONE Linux distribution. `distro` is the
+# Posit Package Manager codename and appears verbatim in client URLs:
 #
-# The default matrix below matches the most common R deployment targets:
-# Ubuntu 24.04 LTS on amd64 + arm64 for current R (4.5 and 4.4).
-# Add rows for RHEL, Debian, macOS, or older R minors as your team needs.
+#   options(repos = c(INTERNAL = "https://packyard.example.org/prod/__linux__/jammy/latest"))
 #
-# os:      linux | darwin | windows
-# arch:    amd64 | arm64 | i386
+# Cells vary only by R minor version. List every R minor your
+# Workbench/Connect images install; clients on an R version without a
+# cell fall back to source packages.
+#
+# distro:  jammy | noble | rhel9 | …   (packyard-server -init -distro …)
+# arch:    amd64 | arm64
 # r_minor: MAJOR.MINOR (e.g. "4.5"; NOT "4.5.1" — R binaries are pinned
 #          at minor-version granularity)
 
+distro: jammy
+arch: amd64
+default_r_minor: "4.5"
+
 cells:
-  - name: ubuntu-24.04-amd64-r-4.5
-    os: linux
-    os_version: ubuntu-24.04
-    arch: amd64
-    r_minor: "4.5"
-
-  - name: ubuntu-24.04-arm64-r-4.5
-    os: linux
-    os_version: ubuntu-24.04
-    arch: arm64
-    r_minor: "4.5"
-
-  - name: ubuntu-24.04-amd64-r-4.4
-    os: linux
-    os_version: ubuntu-24.04
-    arch: amd64
-    r_minor: "4.4"
-
-  - name: ubuntu-24.04-arm64-r-4.4
-    os: linux
-    os_version: ubuntu-24.04
-    arch: arm64
-    r_minor: "4.4"
+  - { name: r-4.4, r_minor: "4.4" }
+  - { name: r-4.5, r_minor: "4.5" }
+  - { name: r-4.6, r_minor: "4.6" }

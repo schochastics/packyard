@@ -21,21 +21,16 @@ func TestListCellsMirrorsMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Fixture seeds two cells (amd64 + arm64 for ubuntu 22.04 R 4.4).
+	if resp.Distro != "jammy" || resp.Arch != "amd64" || resp.DefaultRMinor != "4.4" {
+		t.Errorf("top-level fields = %+v", resp)
+	}
+	// Fixture seeds two cells: R 4.4 and R 4.5.
 	if len(resp.Cells) != 2 {
 		t.Fatalf("got %d cells, want 2", len(resp.Cells))
 	}
-
-	byName := map[string]CellSummary{}
-	for _, c := range resp.Cells {
-		byName[c.Name] = c
-	}
-	amd64, ok := byName["ubuntu-22.04-amd64-r-4.4"]
-	if !ok {
-		t.Fatalf("amd64 cell missing: %+v", resp.Cells)
-	}
-	if amd64.OS != "linux" || amd64.Arch != "amd64" || amd64.RMinor != "4.4" {
-		t.Errorf("amd64 fields = %+v", amd64)
+	if resp.Cells[0] != (CellSummary{Name: "r-4.4", RMinor: "4.4"}) ||
+		resp.Cells[1] != (CellSummary{Name: "r-4.5", RMinor: "4.5"}) {
+		t.Errorf("cells = %+v", resp.Cells)
 	}
 }
 
@@ -60,7 +55,7 @@ func TestListCellsNilMatrixReturnsEmptyArray(t *testing.T) {
 	}
 }
 
-func TestListCellsRequiresAdmin(t *testing.T) {
+func TestListCellsRequiresAnyToken(t *testing.T) {
 	t.Parallel()
 
 	fx := newPublishFixture(t)
@@ -71,10 +66,10 @@ func TestListCellsRequiresAdmin(t *testing.T) {
 		t.Errorf("anon: %d", rec.Code)
 	}
 
-	// Non-admin → 403.
-	tok := seedScopedToken(t, fx, "pub", "publish:*")
+	// A publish-only CI token is enough.
+	tok := seedScopedToken(t, fx, "pub", "publish:dev")
 	rec = doGet(t, fx, "/api/v1/cells", tok)
-	if rec.Code != http.StatusForbidden {
-		t.Errorf("non-admin: %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("publish token: %d %s", rec.Code, rec.Body.String())
 	}
 }

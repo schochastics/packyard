@@ -2,53 +2,43 @@ package api
 
 import (
 	"net/http"
-
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
 )
 
-// CellSummary is one row in the /api/v1/cells response. Mirrors the
-// matrix.yaml entry exactly — no aggregate stats for v1. B4's
-// dashboard can compute coverage from /packages + /cells client-side,
-// which keeps this endpoint a pure-read / no-JOIN response.
+// CellSummary is one row in the /api/v1/cells response.
 type CellSummary struct {
-	Name      string `json:"name"`
-	OS        string `json:"os"`
-	OSVersion string `json:"os_version"`
-	Arch      string `json:"arch"`
-	RMinor    string `json:"r_minor"`
+	Name   string `json:"name"`
+	RMinor string `json:"r_minor"`
 }
 
-// ListCellsResponse wraps the slice.
+// ListCellsResponse is matrix.yaml rendered as JSON: the one distro
+// this deployment serves plus one cell per R minor version.
 type ListCellsResponse struct {
-	Cells []CellSummary `json:"cells"`
+	Distro         string        `json:"distro"`
+	Arch           string        `json:"arch"`
+	DefaultRMinor  string        `json:"default_r_minor"`
+	BuildImageHint string        `json:"build_image_hint,omitempty"`
+	Cells          []CellSummary `json:"cells"`
 }
 
-// handleListCells serves GET /api/v1/cells — essentially the
-// matrix.yaml file, rendered as JSON for clients that prefer a
-// programmatic handle over reading the YAML on disk.
-//
-// Admin-gated for v1 (same rationale as /channels). This endpoint is
-// the weakest case for admin-only since CI workers need the cell
-// list to decide what to build; Phase C may well loosen to "any
-// valid token".
+// handleListCells serves GET /api/v1/cells. CI reads it to decide
+// which R versions to build binaries for, so any valid token may call
+// it — a publish-only CI token included.
 func handleListCells(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !requireScope(w, r, auth.ScopeAdmin) {
+		if !requireAuthenticated(w, r) {
 			return
 		}
 
-		out := []CellSummary{}
-		if deps.Matrix != nil {
-			for _, c := range deps.Matrix.Cells {
-				out = append(out, CellSummary{
-					Name:      c.Name,
-					OS:        c.OS,
-					OSVersion: c.OSVersion,
-					Arch:      c.Arch,
-					RMinor:    c.RMinor,
-				})
+		resp := ListCellsResponse{Cells: []CellSummary{}}
+		if m := deps.Matrix; m != nil {
+			resp.Distro = m.Distro
+			resp.Arch = m.Arch
+			resp.DefaultRMinor = m.DefaultRMinor
+			resp.BuildImageHint = m.BuildImageHint
+			for _, c := range m.Cells {
+				resp.Cells = append(resp.Cells, CellSummary{Name: c.Name, RMinor: c.RMinor})
 			}
 		}
-		writeJSON(w, r, http.StatusOK, ListCellsResponse{Cells: out})
+		writeJSON(w, r, http.StatusOK, resp)
 	}
 }

@@ -330,13 +330,13 @@ type cellsPageData struct {
 	Rows        []cellCoverageRow
 	TotalPkgs   int64 // packages rowcount — cells with this BinariesFor value are 100% covered
 	DeclaredSet bool  // true when Matrix was non-nil; false means cells list shows placeholder
+	Distro      string
+	Arch        string
+	DefaultR    string
 }
 
 type cellCoverageRow struct {
 	Name         string
-	OS           string
-	OSVersion    string
-	Arch         string
 	RMinor       string
 	BinaryCount  int64 // total binaries uploaded for this cell
 	DistinctPkgs int64 // distinct (channel,name,version) tuples covered
@@ -361,10 +361,9 @@ func loadCellsPage(ctx context.Context, d *sql.DB, matrix *config.MatrixConfig) 
 	if matrix == nil {
 		return out, nil
 	}
+	out.Distro, out.Arch, out.DefaultR = matrix.Distro, matrix.Arch, matrix.DefaultRMinor
 	for _, c := range matrix.Cells {
-		row := cellCoverageRow{
-			Name: c.Name, OS: c.OS, OSVersion: c.OSVersion, Arch: c.Arch, RMinor: c.RMinor,
-		}
+		row := cellCoverageRow{Name: c.Name, RMinor: c.RMinor}
 		if a, ok := agg[c.Name]; ok {
 			row.BinaryCount = a.BinaryCount
 			row.DistinctPkgs = a.DistinctPkgs

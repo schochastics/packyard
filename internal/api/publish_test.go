@@ -67,17 +67,12 @@ channels:
 
 	// Seed matrix with two cells (one for tests that need a binary).
 	matrix, err := config.DecodeMatrix(strings.NewReader(`
+distro: jammy
+arch: amd64
+default_r_minor: "4.4"
 cells:
-  - name: ubuntu-22.04-amd64-r-4.4
-    os: linux
-    os_version: ubuntu-22.04
-    arch: amd64
-    r_minor: "4.4"
-  - name: ubuntu-22.04-arm64-r-4.4
-    os: linux
-    os_version: ubuntu-22.04
-    arch: arm64
-    r_minor: "4.4"
+  - { name: r-4.4, r_minor: "4.4" }
+  - { name: r-4.5, r_minor: "4.5" }
 `))
 	if err != nil {
 		t.Fatalf("decode matrix: %v", err)
@@ -166,7 +161,7 @@ func TestPublishHappyPathInsertsAndEmitsEvent(t *testing.T) {
 	manifest := map[string]any{
 		"source": "source",
 		"binaries": []map[string]any{
-			{"cell": "ubuntu-22.04-amd64-r-4.4", "part": "bin_amd64"},
+			{"cell": "r-4.4", "part": "bin_amd64"},
 		},
 	}
 	body, ct := buildPublishBody(t, manifest,

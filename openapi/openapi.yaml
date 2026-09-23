@@ -452,24 +452,32 @@ components:
     # ---- Cells ---------------------------------------------------------
     CellSummary:
       type: object
-      required: [name, os, os_version, arch, r_minor]
+      required: [name, r_minor]
       properties:
         name: { type: string }
-        os:
-          type: string
-          enum: [linux, darwin, windows]
-        os_version: { type: string }
-        arch:
-          type: string
-          enum: [amd64, arm64, i386]
         r_minor:
           type: string
           pattern: '^\d+\.\d+$'
 
     ListCellsResponse:
       type: object
-      required: [cells]
+      description: |
+        matrix.yaml as JSON. A deployment serves exactly one Linux
+        distribution; cells vary only by R minor version.
+      required: [distro, arch, default_r_minor, cells]
       properties:
+        distro:
+          type: string
+          description: PPM codename served under /__linux__/{distro}/ (e.g. jammy, rhel9).
+        arch:
+          type: string
+          enum: [amd64, arm64]
+        default_r_minor:
+          type: string
+          description: Cell used when a client's User-Agent carries no R version.
+        build_image_hint:
+          type: string
+          description: Advisory CI build image; ignored by the server.
         cells:
           type: array
           items: { $ref: '#/components/schemas/CellSummary' }
@@ -858,19 +866,17 @@ paths:
     get:
       summary: List configured build cells
       description: |
-        Admin-gated in v1; strong candidate for loosening to any-valid-
-        token in Phase C since CI workers legitimately need this list
-        to decide what to build.
+        Any valid token may call this: CI workers read it to decide
+        which R versions to build binaries for.
       operationId: listCells
       tags: [meta]
       responses:
         '200':
-          description: Cells as declared in matrix.yaml.
+          description: The distro and cells declared in matrix.yaml.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ListCellsResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
 
   # ---- CRAN-protocol source reads -----------------------------------
   #

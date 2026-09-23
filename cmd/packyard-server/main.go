@@ -44,6 +44,7 @@ func main() {
 		configPath  = flag.String("config", "", "path to server config file (YAML)")
 		dataDir     = flag.String("data", "./data", "data directory (SQLite + CAS blobs); ignored when -config is set")
 		initStorage = flag.Bool("init", false, "initialize data dir (bootstrap configs, create DB, migrate, sync channels) and exit")
+		initDistro  = flag.String("distro", "", "with -init: Linux distro codename for a newly written matrix.yaml (e.g. jammy, rhel9; default jammy)")
 		mintToken   = flag.Bool("mint-token", false, "issue a new API token and exit (prints plaintext once)")
 		tokenScopes = flag.String("scopes", "", "comma-separated scopes for -mint-token (e.g. 'publish:*,read:*,admin')")
 		tokenLabel  = flag.String("label", "", "human-readable label for -mint-token")
@@ -75,7 +76,7 @@ func main() {
 
 	switch {
 	case *initStorage:
-		if err := runInit(cfg); err != nil {
+		if err := runInit(cfg, config.BootstrapOptions{Distro: *initDistro}); err != nil {
 			fmt.Fprintf(os.Stderr, "packyard-server: init failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -109,7 +110,7 @@ func resolveConfig(configPath, dataDir string) (*config.ServerConfig, error) {
 // runInit bootstraps everything needed to make the data dir ready for
 // the first request. Safe to run against an existing data dir: every
 // step is idempotent.
-func runInit(cfg *config.ServerConfig) error {
+func runInit(cfg *config.ServerConfig, opts config.BootstrapOptions) error {
 	dataDir := cfg.DataDir
 	if dataDir == "" {
 		return fmt.Errorf("data dir is required")
@@ -118,7 +119,7 @@ func runInit(cfg *config.ServerConfig) error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
-	bootstrap, err := config.BootstrapDefaults(dataDir)
+	bootstrap, err := config.BootstrapDefaults(dataDir, opts)
 	if err != nil {
 		return fmt.Errorf("bootstrap default configs: %w", err)
 	}
@@ -219,7 +220,7 @@ func runServe(cfg *config.ServerConfig) error {
 		return fmt.Errorf("ensure data dir: %w", err)
 	}
 	if cfg.ChannelsFile == "" && cfg.MatrixFile == "" {
-		if _, err := config.BootstrapDefaults(cfg.DataDir); err != nil {
+		if _, err := config.BootstrapDefaults(cfg.DataDir, config.BootstrapOptions{}); err != nil {
 			return fmt.Errorf("bootstrap default configs: %w", err)
 		}
 	}

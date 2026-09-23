@@ -52,9 +52,9 @@ func TestDefaultAliasBinaryPACKAGES(t *testing.T) {
 	t.Parallel()
 
 	fx := newPublishFixture(t)
-	publishWithBinary(t, fx, "prod", "alpha", "1.0.0", "ubuntu-22.04-amd64-r-4.4")
+	publishWithBinary(t, fx, "prod", "alpha", "1.0.0", "r-4.4")
 
-	rec := getURL(t, fx, "/bin/linux/ubuntu-22.04-amd64-r-4.4/PACKAGES", fx.token)
+	rec := getURL(t, fx, "/bin/linux/r-4.4/PACKAGES", fx.token)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}

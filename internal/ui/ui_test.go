@@ -471,9 +471,10 @@ func TestEventsPageRendersWithFiltersAndPagination(t *testing.T) {
 func TestCellsPageShowsMatrixAndCoverage(t *testing.T) {
 	h, database := newTestHandler(t)
 	h.deps.Matrix = &config.MatrixConfig{
+		Distro: "jammy", Arch: "amd64", DefaultRMinor: "4.4",
 		Cells: []config.Cell{
-			{Name: "linux-deb12-amd64-R44", OS: "debian", OSVersion: "12", Arch: "amd64", RMinor: "4.4"},
-			{Name: "linux-u2404-amd64-R44", OS: "ubuntu", OSVersion: "24.04", Arch: "amd64", RMinor: "4.4"},
+			{Name: "r-4.4", RMinor: "4.4"},
+			{Name: "r-4.5", RMinor: "4.5"},
 		},
 	}
 	tok := seedToken(t, database.DB, "op", "admin", false)
@@ -495,7 +496,7 @@ func TestCellsPageShowsMatrixAndCoverage(t *testing.T) {
 	pkgID, _ := res.LastInsertId()
 	if _, err := database.ExecContext(ctx,
 		`INSERT INTO binaries(package_id, cell, binary_sha256, size)
-		 VALUES (?, 'linux-deb12-amd64-R44', 'aaa', 2048)`, pkgID,
+		 VALUES (?, 'r-4.4', 'aaa', 2048)`, pkgID,
 	); err != nil {
 		t.Fatalf("seed binary: %v", err)
 	}
@@ -509,7 +510,7 @@ func TestCellsPageShowsMatrixAndCoverage(t *testing.T) {
 		t.Fatalf("status = %d; body:\n%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"linux-deb12-amd64-R44", "linux-u2404-amd64-R44", "1 / 1", "debian", "ubuntu"} {
+	for _, want := range []string{"r-4.4", "r-4.5", "1 / 1", "<code>jammy</code> (amd64)", "get R 4.4"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}

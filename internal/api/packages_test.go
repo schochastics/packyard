@@ -25,7 +25,7 @@ func TestListPackagesShape(t *testing.T) {
 
 	fx := newPublishFixture(t)
 	publishSource(t, fx, "dev", "alpha", "1.0.0", []byte("a"))
-	publishWithBinary(t, fx, "dev", "beta", "2.0.0", "ubuntu-22.04-amd64-r-4.4")
+	publishWithBinary(t, fx, "dev", "beta", "2.0.0", "r-4.4")
 
 	rec := doGet(t, fx, "/api/v1/packages", fx.token)
 	if rec.Code != http.StatusOK {
@@ -64,7 +64,7 @@ func TestListPackagesShape(t *testing.T) {
 	if len(beta.Binaries) != 1 {
 		t.Fatalf("beta Binaries = %d, want 1", len(beta.Binaries))
 	}
-	if beta.Binaries[0].Cell != "ubuntu-22.04-amd64-r-4.4" {
+	if beta.Binaries[0].Cell != "r-4.4" {
 		t.Errorf("beta binary cell = %q", beta.Binaries[0].Cell)
 	}
 }

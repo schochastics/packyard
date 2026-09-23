@@ -6,11 +6,12 @@
 </p>
 
 {{if .Data.DeclaredSet}}
+  <p>Serving <code>{{.Data.Distro}}</code> ({{.Data.Arch}}); clients without an R version in their User-Agent get R {{.Data.DefaultR}}.</p>
   {{if .Data.Rows}}
   <table class="events">
     <thead>
       <tr>
-        <th>Cell</th><th>OS</th><th>Arch</th><th>R</th>
+        <th>Cell</th><th>R</th>
         <th>Binaries</th><th>Coverage</th><th>Size</th>
       </tr>
     </thead>
@@ -18,8 +19,6 @@
       {{range .Data.Rows}}
       <tr>
         <td><code>{{.Name}}</code></td>
-        <td>{{.OS}} {{.OSVersion}}</td>
-        <td>{{.Arch}}</td>
         <td>{{.RMinor}}</td>
         <td>{{.BinaryCount}}</td>
         <td>

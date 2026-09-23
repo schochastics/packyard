@@ -193,10 +193,10 @@ func TestGetBinaryOnlyRowsWithBinariesForCell(t *testing.T) {
 	database := setupIndexDB(t)
 	alphaID := seedPackage(t, database, "dev", "alpha", "1.0.0", false)
 	seedPackage(t, database, "dev", "beta", "1.0.0", false) // source-only
-	seedBinary(t, database, alphaID, "ubuntu-22.04-amd64-r-4.4")
+	seedBinary(t, database, alphaID, "r-4.4")
 
 	idx := NewIndex(database.DB)
-	body, _, err := idx.GetBinary(context.Background(), "dev", "ubuntu-22.04-amd64-r-4.4", "4.4", nil, nil)
+	body, _, err := idx.GetBinary(context.Background(), "dev", "r-4.4", "4.4", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

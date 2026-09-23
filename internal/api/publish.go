@@ -41,7 +41,7 @@ var versionRE = regexp.MustCompile(`^[0-9][0-9.\-]*[0-9]$`)
 //
 //	{
 //	  "source": "source",
-//	  "binaries": [{"cell": "ubuntu-22.04-amd64-r-4.4", "part": "bin1"}]
+//	  "binaries": [{"cell": "r-4.4", "part": "bin1"}]
 //	}
 //
 // "source" and "binaries[].part" name other multipart parts. Fields

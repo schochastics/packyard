@@ -69,7 +69,7 @@ func newProxyFixture(t *testing.T) *proxyFixture {
 		{Name: "cran", OverwritePolicy: config.PolicyImmutable, Kind: config.KindProxy, Upstream: &config.UpstreamConfig{
 			SourceURL: upSrv.URL,
 			BinaryURLs: map[string]string{
-				"ubuntu-22.04-amd64-r-4.4": upSrv.URL + "/__linux__/jammy",
+				"r-4.4": upSrv.URL + "/__linux__/jammy",
 			},
 		}},
 	}}
@@ -77,8 +77,8 @@ func newProxyFixture(t *testing.T) *proxyFixture {
 		t.Fatalf("ReconcileChannels: %v", err)
 	}
 
-	matrix := &config.MatrixConfig{Cells: []config.Cell{
-		{Name: "ubuntu-22.04-amd64-r-4.4", OS: "ubuntu", OSVersion: "22.04", Arch: "amd64", RMinor: "4.4"},
+	matrix := &config.MatrixConfig{Distro: "jammy", Arch: "amd64", DefaultRMinor: "4.4", Cells: []config.Cell{
+		{Name: "r-4.4", RMinor: "4.4"},
 	}}
 
 	svc := store.New(database.DB, casStore)
@@ -214,7 +214,7 @@ func TestProxyBinaryTarballMaterializesSourceFirst(t *testing.T) {
 		_, _ = io.WriteString(w, "foo-binary-jammy")
 	})
 
-	resp := f.authedGet(t, "/cran/bin/linux/ubuntu-22.04-amd64-r-4.4/foo_1.0.0.tar.gz")
+	resp := f.authedGet(t, "/cran/bin/linux/r-4.4/foo_1.0.0.tar.gz")
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
@@ -232,7 +232,7 @@ func TestProxyBinaryTarballMaterializesSourceFirst(t *testing.T) {
 	}
 	var binCount int
 	if err := f.deps.DB.QueryRowContext(context.Background(),
-		`SELECT COUNT(*) FROM binaries WHERE package_id=? AND cell='ubuntu-22.04-amd64-r-4.4'`, pkgID).Scan(&binCount); err != nil {
+		`SELECT COUNT(*) FROM binaries WHERE package_id=? AND cell='r-4.4'`, pkgID).Scan(&binCount); err != nil {
 		t.Fatal(err)
 	}
 	if binCount != 1 {
@@ -243,13 +243,13 @@ func TestProxyBinaryTarballMaterializesSourceFirst(t *testing.T) {
 func TestProxyBinaryCellWithoutUpstream404(t *testing.T) {
 	t.Parallel()
 	f := newProxyFixture(t)
-	// We only configured upstream binary for ubuntu-22.04-amd64-r-4.4.
+	// We only configured upstream binary for r-4.4.
 	// Add a cell to matrix that we DON'T proxy.
 	f.deps.Matrix.Cells = append(f.deps.Matrix.Cells, config.Cell{
-		Name: "rhel9-amd64-r-4.4", OS: "rhel", OSVersion: "9", Arch: "amd64", RMinor: "4.4",
+		Name: "r-4.4", RMinor: "4.4",
 	})
 
-	resp := f.authedGet(t, "/cran/bin/linux/rhel9-amd64-r-4.4/foo_1.0.0.tar.gz")
+	resp := f.authedGet(t, "/cran/bin/linux/r-4.4/foo_1.0.0.tar.gz")
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)

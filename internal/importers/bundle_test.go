@@ -188,13 +188,11 @@ func buildTestBinaryBundle(t *testing.T, root, cell string, pkgs map[string]stri
 // binary bundle imports validate. Reused across binary-mode tests.
 func withMatrix(deps api.Deps, cell string) api.Deps {
 	deps.Matrix = &config.MatrixConfig{
+		Distro: "jammy", Arch: "amd64", DefaultRMinor: "4.4",
 		Cells: []config.Cell{
 			{
-				Name:      cell,
-				OS:        "linux",
-				OSVersion: "rhel9",
-				Arch:      "amd64",
-				RMinor:    "4.4",
+				Name:   cell,
+				RMinor: "4.4",
 			},
 		},
 	}
@@ -478,7 +476,7 @@ func TestBundleV1ManifestStillImports(t *testing.T) {
 // import a source bundle to seed packages rows, then import a binary
 // bundle on the same channel and confirm binaries land.
 func TestBundleBinaryRoundTrip(t *testing.T) {
-	const cell = "rhel9-amd64-r-4.4"
+	const cell = "r-4.4"
 
 	srcRoot := t.TempDir()
 	buildTestBundle(t, srcRoot, map[string]string{
@@ -525,7 +523,7 @@ func TestBundleBinaryRoundTrip(t *testing.T) {
 // ErrSourceRowMissing per package when the matching source bundle
 // hasn't been imported yet, without aborting the whole run.
 func TestBundleBinaryFailsWithoutSource(t *testing.T) {
-	const cell = "rhel9-amd64-r-4.4"
+	const cell = "r-4.4"
 
 	binRoot := t.TempDir()
 	buildTestBinaryBundle(t, binRoot, cell, map[string]string{
@@ -556,7 +554,7 @@ func TestBundleBinaryFailsWithoutSource(t *testing.T) {
 // TestBundleBinaryRejectsUnknownCell aborts before pre-flight if the
 // bundle's cell isn't in matrix.yaml.
 func TestBundleBinaryRejectsUnknownCell(t *testing.T) {
-	const cell = "rhel9-amd64-r-4.4"
+	const cell = "r-4.4"
 
 	binRoot := t.TempDir()
 	buildTestBinaryBundle(t, binRoot, cell, map[string]string{
@@ -579,7 +577,7 @@ func TestBundleBinaryRejectsUnknownCell(t *testing.T) {
 // TestBundleBinaryPreflightMismatch checks that a tampered binary
 // tarball aborts the whole import before any binaries land.
 func TestBundleBinaryPreflightMismatch(t *testing.T) {
-	const cell = "rhel9-amd64-r-4.4"
+	const cell = "r-4.4"
 
 	srcRoot := t.TempDir()
 	buildTestBundle(t, srcRoot, map[string]string{

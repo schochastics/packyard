@@ -84,3 +84,16 @@ func requireScope(w http.ResponseWriter, r *http.Request, required string) bool 
 	}
 	return true
 }
+
+// requireAuthenticated writes a 401 and returns false for anonymous
+// requests. Any valid token passes, whatever its scopes; used for
+// read-only metadata that CI workers with publish-only tokens need.
+func requireAuthenticated(w http.ResponseWriter, r *http.Request) bool {
+	if _, ok := IdentityFromContext(r.Context()); !ok {
+		writeError(w, r, http.StatusUnauthorized,
+			CodeUnauthorized, "authentication required",
+			"supply a valid bearer token in the Authorization header")
+		return false
+	}
+	return true
+}
