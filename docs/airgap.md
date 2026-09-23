@@ -235,14 +235,15 @@ for your operators.
 ### Build a binary bundle
 
 ```sh
-# Run from any host (Mac, Linux, Windows) — P3M's Linux URLs serve
-# precompiled tarballs based on the URL path, not on the requesting
-# client's OS. So building RHEL 9 binaries on a Mac is fine.
+# Run from any host (Mac, Linux, Windows). P3M decides binary vs
+# source from the User-Agent; the bundler sends a Linux R User-Agent
+# for --r-version and --arch (default amd64), and fails on anything
+# that isn't a binary. So building RHEL 9 binaries on a Mac is fine.
 Rscript build-bundle.R \
   --packages    packages.txt \
   --r-version   4.4 \
   --snapshot    cran-r4.4-2026q1 \
-  --binary-cell rhel9-amd64-r-4.4 \
+  --binary-cell r-4.4 \
   --binary-repo https://packagemanager.posit.co/cran/__linux__/rhel9/2026-04-01 \
   --out         ./bundle-bin/
 
@@ -259,14 +260,18 @@ build side — typos surface at import time as
 Before importing, declare the cell on the air-gap server:
 
 ```yaml
-# matrix.yaml
+# matrix.yaml: one distro per server, one cell per R minor
+distro: rhel9
+arch: amd64
+default_r_minor: "4.4"
 cells:
-  - name: rhel9-amd64-r-4.4
-    os: linux
-    os_version: rhel9
-    arch: amd64
+  - name: r-4.4
     r_minor: "4.4"
 ```
+
+The bundle's `--binary-repo` distro and `--arch` must match
+`distro` and `arch` here: clients reach the binaries at
+`…/__linux__/rhel9/latest`.
 
 Restart the server so the matrix is reloaded.
 
@@ -290,8 +295,8 @@ is idempotent — already-present binaries are reported as `skipped=`.
 
 ### Multiple cells
 
-One bundle = one cell. To support a second cell, run the bundler
-again with a different `--binary-cell` / `--binary-repo` and
+One bundle = one cell. To support a second R version, run the
+bundler again with a different `--r-version` / `--binary-cell` and
 import the resulting archive. Cells are independent: the read
 surface serves whichever cells the operator has populated, falling
 back to source for clients on cells that aren't built.

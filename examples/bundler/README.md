@@ -74,14 +74,14 @@ Rscript build-bundle.R \
   --out        ./bundle-src/
 
 # Step 2: build the binary bundle for one cell. Run from any build
-# host (Mac, Linux, Windows) — Posit Public Package Manager's
-# __linux__/<distro>/<snapshot> URLs serve precompiled tarballs
-# regardless of the requesting client's OS.
+# host (Mac, Linux, Windows): the bundler asks Posit Public Package
+# Manager for binaries with a Linux R User-Agent for --r-version and
+# --arch, and fails on any download that isn't a binary.
 Rscript build-bundle.R \
   --packages    packages.txt \
   --r-version   4.4 \
   --snapshot    cran-r4.4-2026q2 \
-  --binary-cell rhel9-amd64-r-4.4 \
+  --binary-cell r-4.4 \
   --binary-repo https://packagemanager.posit.co/cran/__linux__/rhel9/2026-04-01 \
   --out         ./bundle-bin/
 ```
@@ -100,9 +100,9 @@ package in the binary bundle lands in `failed=` with
 import succeeds — the second run is idempotent.
 
 The cell name (`--binary-cell`) must match a cell declared in
-`matrix.yaml` on the air-gap server. The default matrix ships
-Ubuntu cells; add RHEL / Rocky / Alma rows yourself before
-importing. The bundler does not validate this on the build side.
+`matrix.yaml` on the air-gap server, and the `--binary-repo` distro
+must be the server's `distro`. The bundler does not validate either
+on the build side.
 
 ## Flags
 
@@ -115,8 +115,9 @@ importing. The bundler does not validate this on the build side.
 | `--out DIR` | yes | Output directory. Created if missing. |
 | `--repos URL` | no | Upstream source repo, defaults to `https://cloud.r-project.org`. Override to point at a snapshot mirror (PPM dated URL, RSPM, an internal mirror). |
 | `--with-suggests` | no | Also walk `Suggests:`. Roughly doubles bundle size. Off by default. |
-| `--binary-cell NAME` | binary mode | Cell to bundle for, matching a name in the air-gap server's `matrix.yaml` (e.g. `rhel9-amd64-r-4.4`). Activates binary mode; requires `--binary-repo` and `--packages`. |
+| `--binary-cell NAME` | binary mode | Cell to bundle for, matching a name in the air-gap server's `matrix.yaml` (e.g. `r-4.4`). Activates binary mode; requires `--binary-repo` and `--packages`. |
 | `--binary-repo URL` | binary mode | P3M-style URL whose `src/contrib/` path serves precompiled tarballs for the cell, e.g. `https://packagemanager.posit.co/cran/__linux__/rhel9/2026-04-01`. |
+| `--arch amd64\|arm64` | no | Architecture to request binaries for (default `amd64`). Must match the server's `matrix.yaml` `arch`. |
 
 ## What the bundle looks like
 

@@ -21,13 +21,15 @@
 #   # Binary bundle for a specific cell (e.g. RHEL 9 amd64, R 4.4).
 #   # Run after the matching source bundle is already on the channel.
 #   # Pull binaries from Posit Public Package Manager — works from any
-#   # build host (Mac, Linux, Windows) because P3M's __linux__/<distro>
-#   # URLs serve precompiled tarballs without UA sniffing.
+#   # build host (Mac, Linux, Windows): P3M picks binary vs source from
+#   # the User-Agent, so the bundler sends a Linux R User-Agent for
+#   # --r-version and --arch, and rejects any download that isn't a
+#   # binary.
 #   Rscript build-bundle.R \
 #     --packages packages.txt \
 #     --r-version 4.4 \
 #     --snapshot cran-r4.4-2026q1 \
-#     --binary-cell rhel9-amd64-r-4.4 \
+#     --binary-cell r-4.4 \
 #     --binary-repo https://packagemanager.posit.co/cran/__linux__/rhel9/2026-04-01 \
 #     --out bundle-bin/
 #
@@ -62,6 +64,7 @@ parse_args <- function(argv) {
     repos         = "https://cloud.r-project.org",
     binary_cell   = NULL,
     binary_repo   = NULL,
+    arch          = "amd64",
     deps          = c("Imports", "Depends", "LinkingTo")
   )
   i <- 1
@@ -80,6 +83,7 @@ parse_args <- function(argv) {
       "--repos"        = { out$repos <- val(); i <- i + 2 },
       "--binary-cell"  = { out$binary_cell <- val(); i <- i + 2 },
       "--binary-repo"  = { out$binary_repo <- val(); i <- i + 2 },
+      "--arch"         = { out$arch <- val(); i <- i + 2 },
       "--with-suggests"= { out$deps <- c(out$deps, "Suggests"); i <- i + 1 },
       "-h"             = { print_help(); quit(save = "no", status = 0) },
       "--help"         = { print_help(); quit(save = "no", status = 0) },
@@ -95,6 +99,7 @@ parse_args <- function(argv) {
   # Binary mode is mutually exclusive with --full and requires both
   # --binary-cell and --binary-repo. Subset is the only sensible binary
   # shape: closed list of packages + their deps for one cell.
+  if (!out$arch %in% c("amd64", "arm64")) stop("--arch must be amd64 or arm64", call. = FALSE)
   if (!is.null(out$binary_cell) || !is.null(out$binary_repo)) {
     if (is.null(out$binary_cell) || is.null(out$binary_repo)) {
       stop("--binary-cell and --binary-repo must be set together", call. = FALSE)
@@ -109,7 +114,7 @@ parse_args <- function(argv) {
 print_help <- function() {
   cat("Usage: build-bundle.R [--packages FILE | --full] --r-version X.Y --snapshot ID --out DIR\n")
   cat("                      [--repos URL] [--with-suggests]\n")
-  cat("                      [--binary-cell NAME --binary-repo P3M_URL]\n")
+  cat("                      [--binary-cell NAME --binary-repo P3M_URL [--arch amd64|arm64]]\n")
   cat("\n")
   cat("Source mode (default):    bundles source tarballs from --repos.\n")
   cat("Binary mode (binary-*):   bundles precompiled tarballs for one cell.\n")
@@ -148,7 +153,7 @@ build_subset <- function(args) {
 build_full <- function(args) {
   message("[bundler] full mode: enumerating all CRAN packages for R ", args$r_version)
   db <- available.packages(
-    repos   = contrib.url(args$repos, type = "source"),
+    contriburl = contrib.url(args$repos, type = "source"),
     type    = "source",
     filters = "duplicates"
   )
@@ -186,7 +191,7 @@ build_binary <- function(args) {
 
   # Resolve concrete versions from the upstream PACKAGES index.
   available <- available.packages(
-    repos   = contrib.url(args$binary_repo, type = "source"),
+    contriburl = contrib.url(args$binary_repo, type = "source"),
     type    = "source",
     filters = "duplicates"
   )
@@ -200,6 +205,14 @@ build_binary <- function(args) {
   cell_dir <- file.path(args$out, "bin", "linux", args$binary_cell)
   dir.create(cell_dir, showWarnings = FALSE, recursive = TRUE)
 
+  # P3M serves a binary only to a Linux R User-Agent, and for the R
+  # version in it; anything else gets the source tarball. Present as R
+  # <r-version> on Linux regardless of where the bundler runs. Passed
+  # as a header: download.file() ignores options(HTTPUserAgent).
+  triple <- if (args$arch == "arm64") "aarch64" else "x86_64"
+  ua <- c("User-Agent" = sprintf("R (%s.0 %s-pc-linux-gnu %s linux-gnu)",
+                                 args$r_version, triple, triple))
+
   contrib_url <- contrib.url(args$binary_repo, type = "source")
   for (p in closure) {
     ver <- available[p, "Version"]
@@ -207,8 +220,12 @@ build_binary <- function(args) {
     src <- paste0(contrib_url, "/", fn)
     dst <- file.path(cell_dir, fn)
     message(sprintf("[bundler] %s %s ...", p, ver))
-    if (utils::download.file(src, destfile = dst, mode = "wb", quiet = TRUE) != 0L) {
+    if (utils::download.file(src, destfile = dst, mode = "wb", quiet = TRUE, headers = ua) != 0L) {
       stop(sprintf("[bundler] download failed: %s", src), call. = FALSE)
+    }
+    if (!is_binary_tarball(dst, p)) {
+      stop(sprintf("[bundler] %s is a source tarball, not a binary: %s has no binary for R %s on this distro",
+                   fn, args$binary_repo, args$r_version), call. = FALSE)
     }
   }
 
@@ -219,6 +236,16 @@ build_binary <- function(args) {
   tools::write_PACKAGES(cell_dir, type = "source")
 
   closure
+}
+
+# is_binary_tarball: R CMD INSTALL --build stamps a Built: field into
+# DESCRIPTION; source tarballs don't have one.
+is_binary_tarball <- function(path, pkg) {
+  tmp <- tempfile()
+  on.exit(unlink(tmp, recursive = TRUE))
+  utils::untar(path, files = file.path(pkg, "DESCRIPTION"), exdir = tmp)
+  desc <- file.path(tmp, pkg, "DESCRIPTION")
+  file.exists(desc) && "Built" %in% colnames(read.dcf(desc))
 }
 
 write_manifest <- function(args, included) {
