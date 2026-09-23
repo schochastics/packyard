@@ -76,7 +76,7 @@ jobs:
           docker run -d --name packyard-smoke -p 8080:8080 \
             -v packyard-smoke-data:/data \
             "ghcr.io/${{ github.repository }}:$IMAGE_TAG" \
-            -data /data -allow-anonymous-reads
+            -data /data
 
           # Wait up to 30 s for /health to return 200.
           for i in $(seq 1 30); do

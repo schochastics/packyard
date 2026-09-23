@@ -1,4 +1,4 @@
-.PHONY: all build test fmt vet lint openapi-lint check clean help
+.PHONY: all build test fmt vet lint openapi-lint check e2e clean help
 
 BIN          := packyard-server
 CMD_DIR      := ./cmd/packyard-server
@@ -36,9 +36,14 @@ openapi-lint: ## Lint openapi/openapi.yaml with vacuum (installs if missing)
 
 check: vet lint test openapi-lint ## Run vet, lint, tests, and openapi-lint
 
+E2E_DISTROS ?= jammy rhel9
+
+e2e: ## Run the Docker end-to-end suite: real R clients against a live server
+	tests/e2e/run.sh $(E2E_DISTROS)
+
 clean: ## Remove build artefacts
 	rm -f $(BIN)
 	rm -rf dist
 
 help: ## List make targets
-	@awk 'BEGIN {FS = ":.*##"; printf "\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*?##/ { printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)

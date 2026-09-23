@@ -64,6 +64,11 @@ func TestRMinorFromUserAgent(t *testing.T) {
 		{"R (4.6.1 x86_64-pc-linux-gnu x86_64 linux-gnu) pkgcache/2.2.0", "4.6", true},
 		{"libcurl/8.5.0 R (4.4.1 x86_64-pc-linux-gnu x86_64 linux-gnu)", "4.4", true},
 		{"R (4.10.0)", "4.10", true},
+		// Collected by make e2e: Posit's R builds (R/x.y.z (<os>) prefix),
+		// renv on top of them; pak downloads with R's own User-Agent.
+		{"R/4.4.3 (ubuntu-22.04) R (4.4.3 x86_64-pc-linux-gnu x86_64 linux-gnu)", "4.4", true},
+		{"R/4.5.3 (almalinux-9.8) R (4.5.3 x86_64-pc-linux-gnu x86_64 linux-gnu)", "4.5", true},
+		{"renv (1.2.4); R/4.4.3 (ubuntu-22.04) R (4.4.3 x86_64-pc-linux-gnu x86_64 linux-gnu)", "4.4", true},
 		{"curl/8.5.0", "", false},
 		{"", "", false},
 		{"RStudio (2024.12)", "", false},

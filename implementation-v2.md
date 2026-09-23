@@ -304,7 +304,7 @@ The fixture package has three versions published, the newest yanked, and a binar
 4. reads `Meta/archive.rds` with `readRDS` and gets the expected data frame;
 5. runs `remotes::install_version()` for an archived version;
 6. runs `renv::restore()` with a lockfile pinning an archived version, via both the plain `src/contrib` URL and the `__linux__` URL;
-7. runs `pak::pkg_install("pkg@<archived>")`;
+7. runs `pak::pkg_install("pkg@<archived>")`. *Result:* pak resolves `@version` against CRAN's metadata service only and silently installs the current version from any other repository, so the suite checks the current version plus a `url::…/Archive/…` pin instead (documented in tests/e2e/README.md);
 8. installs the yanked version by exact pin, which must succeed;
 9. requests the wrong distro in the URL and gets a clear failure (R warns that it can't access the index).
 

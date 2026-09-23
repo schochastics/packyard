@@ -89,6 +89,7 @@ func accessLogMiddleware(next http.Handler) http.Handler {
 			"bytes", rec.bytes,
 			"duration_ms", time.Since(start).Milliseconds(),
 			"remote", r.RemoteAddr,
+			"user_agent", r.UserAgent(),
 			"request_id", RequestIDFromContext(r.Context()),
 		)
 	})
