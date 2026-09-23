@@ -6,128 +6,160 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
+	"regexp"
 
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 	"gitea.cynkra.com/david.schoch/packyard/internal/store"
 	"gitea.cynkra.com/david.schoch/packyard/internal/upstream"
 )
 
-// handleBinaryPackages serves GET /{channel}/bin/linux/{cell}/PACKAGES.
-// Only rows that have a binary for the cell appear.
-func handleBinaryPackages(deps Deps) http.HandlerFunc {
+// Linux binaries are served the way Posit Package Manager serves
+// them: at a src/contrib path under /__linux__/{distro}/{snapshot}/,
+// because R on Linux only ever requests <repo>/src/contrib/. The
+// client's R minor version comes from its User-Agent and picks the
+// cell; packages without a binary for that cell are served as source.
+//
+//	GET /{channel}/__linux__/{distro}/latest/src/contrib/PACKAGES[.gz]
+//	GET /{channel}/__linux__/{distro}/latest/src/contrib/{file}
+//	GET /{channel}/__linux__/{distro}/latest/src/contrib/Archive/{pkg}/{file}
+//	(+ the same without /{channel} for the default channel)
+
+// rUserAgentRE matches the R version R puts in its User-Agent,
+// "R (4.4.3 x86_64-pc-linux-gnu x86_64 linux-gnu)". renv, pak and
+// Posit Connect's restores all download through R and send the same
+// prefix.
+var rUserAgentRE = regexp.MustCompile(`(?:^|[\s;])R \((\d+)\.(\d+)(?:\.\d+)?[\s)]`)
+
+// rMinorFromUserAgent extracts "4.4" from an R User-Agent.
+func rMinorFromUserAgent(ua string) (string, bool) {
+	m := rUserAgentRE.FindStringSubmatch(ua)
+	if m == nil {
+		return "", false
+	}
+	return m[1] + "." + m[2], true
+}
+
+// resolveLinuxCell validates the {distro} and {snapshot} segments and
+// returns the cell for the requesting client, or nil when its R
+// version has no cell (serve source). It writes the error and returns
+// ok=false when the URL doesn't match this deployment.
+func resolveLinuxCell(w http.ResponseWriter, r *http.Request, deps Deps) (cell *config.Cell, ok bool) {
+	// The response depends on the client's R version; shared caches
+	// must not hand an R 4.4 binary to R 4.6.
+	w.Header().Add("Vary", "User-Agent")
+
+	m := deps.Matrix
+	if m == nil {
+		writeError(w, r, http.StatusNotFound, CodeNotFound,
+			"no binary matrix configured", "add matrix.yaml and restart the server")
+		return nil, false
+	}
+	if d := r.PathValue("distro"); d != m.Distro {
+		writeError(w, r, http.StatusNotFound, CodeNotFound,
+			fmt.Sprintf("distro %q not served; this repository serves %q", d, m.Distro),
+			fmt.Sprintf("use /__linux__/%s/latest in the repository URL", m.Distro))
+		return nil, false
+	}
+	if snap := r.PathValue("snapshot"); snap != "latest" {
+		writeError(w, r, http.StatusNotFound, CodeNotFound,
+			fmt.Sprintf("snapshot %q not available; snapshots are not supported", snap),
+			"use latest")
+		return nil, false
+	}
+	rMinor, found := rMinorFromUserAgent(r.UserAgent())
+	if !found {
+		rMinor = m.DefaultRMinor
+	}
+	return m.CellForRMinor(rMinor), true
+}
+
+func handleLinuxPackages(deps Deps, gzipped bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		serveBinaryPackages(w, r, deps, r.PathValue("channel"), r.PathValue("cell"), false)
+		withChannel(w, r, deps, func(channel string) {
+			serveLinuxPackages(w, r, deps, channel, gzipped)
+		})
 	}
 }
 
-// handleBinaryPackagesGz is the gzipped variant for clients that ask
-// for .gz first.
-func handleBinaryPackagesGz(deps Deps) http.HandlerFunc {
+func handleLinuxTarball(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		serveBinaryPackages(w, r, deps, r.PathValue("channel"), r.PathValue("cell"), true)
+		withChannel(w, r, deps, func(channel string) {
+			serveLinuxTarball(w, r, deps, channel, "", r.PathValue("file"))
+		})
 	}
 }
 
-// handleBinaryTarball serves GET /{channel}/bin/linux/{cell}/{file}.
-// File shape matches source tarballs: <Package>_<Version>.tar.gz.
-// Linux R binaries follow the PPM convention of using tar.gz files
-// that unpack as already-built packages — filenames are the same as
-// source to keep URL patterns predictable.
-func handleBinaryTarball(deps Deps) http.HandlerFunc {
+func handleLinuxArchiveTarball(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		serveBinaryTarball(w, r, deps, r.PathValue("channel"), r.PathValue("cell"), r.PathValue("file"))
+		withChannel(w, r, deps, func(channel string) {
+			serveLinuxTarball(w, r, deps, channel, r.PathValue("pkg"), r.PathValue("file"))
+		})
 	}
 }
 
-// handleDefaultBinaryPackages / ...Gz / ...Tarball serve the alias
-// routes under /bin/linux/{cell}/... — no channel in the URL.
-func handleDefaultBinaryPackages(deps Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		serveBinaryPackages(w, r, deps, ch, r.PathValue("cell"), false)
-	}
-}
-
-func handleDefaultBinaryPackagesGz(deps Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		serveBinaryPackages(w, r, deps, ch, r.PathValue("cell"), true)
-	}
-}
-
-func handleDefaultBinaryTarball(deps Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		serveBinaryTarball(w, r, deps, ch, r.PathValue("cell"), r.PathValue("file"))
-	}
-}
-
-func serveBinaryPackages(w http.ResponseWriter, r *http.Request, deps Deps, channel, cell string, gzipped bool) {
-	if !requireReadScope(w, r, deps, channel) {
+func serveLinuxPackages(w http.ResponseWriter, r *http.Request, deps Deps, channel string, gzipped bool) {
+	cell, ok := resolveLinuxCell(w, r, deps)
+	if !ok || !requireReadScope(w, r, deps, channel) {
 		return
 	}
-	body, herr := loadBinaryPackages(r.Context(), deps, channel, cell)
-	if herr != nil {
+	if herr := requireChannel(r.Context(), deps, channel); herr != nil {
 		herr.write(w, r)
 		return
 	}
-	if gzipped {
-		gz, err := gzipBytes(body)
-		if err != nil {
-			writeError(w, r, http.StatusInternalServerError,
-				CodeInternal, "gzip: "+err.Error(), "")
+	meta := lookupChannelMeta(r.Context(), deps, channel)
+	body, stale, err := deps.Index.GetLinux(r.Context(), channel, cell, deps.Matrix.Arch, meta, deps.Upstream)
+	if err != nil {
+		if meta.IsProxy() {
+			writeError(w, r, http.StatusServiceUnavailable, CodeUnavailable,
+				"upstream PACKAGES fetch failed", err.Error())
 			return
 		}
-		w.Header().Set("Content-Type", "application/gzip")
-		w.Header().Set("Content-Length", strconv.Itoa(len(gz)))
-		_, _ = w.Write(gz)
+		internalErr("build packages", err).write(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-	_, _ = w.Write(body)
+	noteProxyIndexRead(r.Context(), deps, channel, meta, stale)
+	writeIndexBody(w, r, body, gzipped)
 }
 
-func serveBinaryTarball(w http.ResponseWriter, r *http.Request, deps Deps, channel, cell, file string) {
-	if !requireReadScope(w, r, deps, channel) {
+// serveLinuxTarball serves {file} for the client's cell: the binary
+// when one exists for that version, otherwise the source tarball.
+// archivePkg is the {pkg} segment of an Archive/ URL ("" otherwise).
+func serveLinuxTarball(w http.ResponseWriter, r *http.Request, deps Deps, channel, archivePkg, file string) {
+	cell, ok := resolveLinuxCell(w, r, deps)
+	if !ok || !requireReadScope(w, r, deps, channel) {
 		return
 	}
-	name, version, ok := parseSourceTarballFilename(file)
+	name, version, ok := parseTarballPath(archivePkg, file)
 	if !ok {
-		writeError(w, r, http.StatusNotFound,
-			CodeNotFound, "unknown resource",
-			"binary tarballs are named <Package>_<Version>.tar.gz")
+		writeTarballNameError(w, r)
 		return
 	}
-	sum, size, herr := lookupBinaryBlob(r.Context(), deps.DB.DB, channel, name, version, cell)
-	if herr != nil {
-		if herr.status == http.StatusNotFound {
-			if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
-				if herr2 := proxyFetchBinaryTarball(r.Context(), deps, meta, name, version, cell); herr2 != nil {
-					herr2.write(w, r)
-					return
-				}
-				sum, size, herr = lookupBinaryBlob(r.Context(), deps.DB.DB, channel, name, version, cell)
-			}
+	if cell != nil {
+		sum, size, herr := lookupBinaryBlob(r.Context(), deps.DB.DB, channel, name, version, cell.Name)
+		if herr == nil {
+			serveBlob(w, r, deps, sum, size, "application/x-gzip")
+			return
 		}
-		if herr != nil {
+		if herr.status != http.StatusNotFound {
 			herr.write(w, r)
 			return
 		}
+		meta := lookupChannelMeta(r.Context(), deps, channel)
+		if meta.IsProxy() && meta.Upstream.BinaryURLs[cell.Name] != "" {
+			herr := proxyFetchBinaryTarball(r.Context(), deps, meta, name, version, cell.Name)
+			if herr != nil && herr.status != http.StatusNotFound {
+				herr.write(w, r)
+				return
+			}
+			if herr == nil {
+				if sum, size, herr := lookupBinaryBlob(r.Context(), deps.DB.DB, channel, name, version, cell.Name); herr == nil {
+					serveBlob(w, r, deps, sum, size, "application/x-gzip")
+					return
+				}
+			}
+		}
 	}
-	serveBlob(w, r, deps, sum, size, "application/x-gzip")
+	serveSourceVersion(w, r, deps, channel, name, version)
 }
 
 // proxyFetchBinaryTarball materializes one (channel, name, version,
@@ -235,55 +267,4 @@ func lookupBinaryBlob(ctx context.Context, db *sql.DB, channel, name, version, c
 		return "", 0, internalErr("binary lookup", err)
 	}
 	return sum, size, nil
-}
-
-// loadBinaryPackages wraps Index.GetBinary with 404s for unknown
-// channel and unknown cell. Looking up the cell in matrix.yaml lets
-// us surface a targeted error before doing a DB read.
-func loadBinaryPackages(ctx context.Context, deps Deps, channel, cell string) ([]byte, *httpError) {
-	ok, err := channelExists(ctx, deps.DB.DB, channel)
-	if err != nil {
-		return nil, internalErr("channel lookup", err)
-	}
-	if !ok {
-		return nil, &httpError{
-			status: http.StatusNotFound,
-			code:   CodeNotFound,
-			msg:    fmt.Sprintf("channel %q not found", channel),
-		}
-	}
-	if deps.Matrix == nil || deps.Matrix.Lookup(cell) == nil {
-		return nil, &httpError{
-			status: http.StatusNotFound,
-			code:   CodeNotFound,
-			msg:    fmt.Sprintf("cell %q is not configured", cell),
-			hint:   "add the cell to matrix.yaml and restart the server",
-		}
-	}
-	rMinor := deps.Matrix.Lookup(cell).RMinor
-	meta := lookupChannelMeta(ctx, deps, channel)
-	body, stale, err := deps.Index.GetBinary(ctx, channel, cell, rMinor, meta, deps.Upstream)
-	if err != nil {
-		if meta.IsProxy() {
-			return nil, &httpError{
-				status: http.StatusServiceUnavailable,
-				code:   CodeUnavailable,
-				msg:    "upstream binary PACKAGES fetch failed",
-				hint:   err.Error(),
-			}
-		}
-		return nil, internalErr("build binary packages", err)
-	}
-	if stale {
-		_, _ = deps.DB.ExecContext(ctx, `
-			INSERT INTO events(type, channel, note)
-			VALUES ('proxy_index_stale_served', ?, 'binary PACKAGES upstream unreachable')
-		`, channel)
-		if deps.Metrics != nil {
-			deps.Metrics.ProxyFetchTotal.WithLabelValues(channel, "index", "stale").Inc()
-		}
-	} else if meta.IsProxy() && deps.Metrics != nil {
-		deps.Metrics.ProxyFetchTotal.WithLabelValues(channel, "index", "ok").Inc()
-	}
-	return body, nil
 }

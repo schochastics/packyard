@@ -108,26 +108,28 @@ var ErrImmutableConflict = errors.New("immutable channel already has this versio
 // bundle before its matching source bundle.
 var ErrSourceRowMissing = errors.New("source row not found; import the source bundle first")
 
-// CASWriter is the surface the store needs from the CAS layer. Kept as
+// BlobStore is the surface the store needs from the CAS layer. Kept as
 // an interface so tests can plug in a mock; the concrete impl is
-// *cas.Store.
-type CASWriter interface {
+// *cas.Store. Read is used to extract DESCRIPTION metadata from
+// tarballs at materialization time.
+type BlobStore interface {
 	Write(io.Reader) (string, int64, error)
+	Read(sum string) (io.ReadCloser, error)
 }
 
 // Service owns the materialization primitive. Construct with [New].
 type Service struct {
 	db  *sql.DB
-	cas CASWriter
+	cas BlobStore
 }
 
 // New constructs a Service. Neither dependency is optional.
-func New(db *sql.DB, cas CASWriter) *Service {
+func New(db *sql.DB, cas BlobStore) *Service {
 	return &Service{db: db, cas: cas}
 }
 
 // WriteBlob streams r to CAS and returns a BlobRef. Convenience over
-// the [CASWriter.Write] tuple shape for callers that don't otherwise
+// the [BlobStore.Write] tuple shape for callers that don't otherwise
 // want to think about CAS.
 func (s *Service) WriteBlob(r io.Reader) (BlobRef, error) {
 	sum, size, err := s.cas.Write(r)
@@ -155,6 +157,14 @@ func (s *Service) WriteBlob(r io.Reader) (BlobRef, error) {
 // Materialize returns.
 func (s *Service) Materialize(ctx context.Context, in Input) (*Result, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+
+	// Tarball metadata is read before the write transaction so the tx
+	// never holds the SQLite write lock across CAS I/O.
+	fields := s.indexFieldsJSON(in.Source.SHA256, in.Name)
+	built := make(map[string]string, len(in.Binaries))
+	for _, b := range in.Binaries {
+		built[b.Cell] = s.builtField(b.Blob.SHA256, in.Name)
+	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -191,7 +201,7 @@ func (s *Service) Materialize(ctx context.Context, in Input) (*Result, error) {
 	var eventType string
 	switch {
 	case !exists:
-		if err := insertPackageAndBinaries(ctx, tx, in, now); err != nil {
+		if err := insertPackageAndBinaries(ctx, tx, in, fields, built, now); err != nil {
 			return nil, fmt.Errorf("insert package: %w", err)
 		}
 		eventType = "publish"
@@ -211,16 +221,17 @@ func (s *Service) Materialize(ctx context.Context, in Input) (*Result, error) {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE packages
 			   SET source_sha256 = ?, source_size = ?, published_at = ?,
-			       published_by = ?, yanked = 0, yank_reason = NULL
+			       published_by = ?, yanked = 0, yank_reason = NULL,
+			       index_fields = ?
 			 WHERE id = ?
-		`, in.Source.SHA256, in.Source.Size, now, nullIfEmpty(in.Actor), existingID); err != nil {
+		`, in.Source.SHA256, in.Source.Size, now, nullIfEmpty(in.Actor), fields, existingID); err != nil {
 			return nil, fmt.Errorf("update package: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM binaries WHERE package_id = ?`, existingID); err != nil {
 			return nil, fmt.Errorf("delete old binaries: %w", err)
 		}
-		if err := insertBinariesFor(ctx, tx, existingID, in.Binaries, now); err != nil {
+		if err := insertBinariesFor(ctx, tx, existingID, in.Binaries, built, now); err != nil {
 			return nil, fmt.Errorf("insert replacement binaries: %w", err)
 		}
 		result.Overwritten = true
@@ -257,6 +268,7 @@ func (s *Service) Materialize(ctx context.Context, in Input) (*Result, error) {
 // the diff is intentional.
 func (s *Service) AttachBinary(ctx context.Context, in AttachInput) (*AttachResult, error) {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	built := s.builtField(in.Binary.SHA256, in.Name)
 
 	var (
 		packageID  int64
@@ -297,9 +309,9 @@ func (s *Service) AttachBinary(ctx context.Context, in AttachInput) (*AttachResu
 	switch err := row.Scan(&existingSHA); {
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO binaries(package_id, cell, binary_sha256, size, uploaded_at)
-			VALUES (?, ?, ?, ?, ?)
-		`, packageID, in.Cell, in.Binary.SHA256, in.Binary.Size, now); err != nil {
+			INSERT INTO binaries(package_id, cell, binary_sha256, size, uploaded_at, built)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, packageID, in.Cell, in.Binary.SHA256, in.Binary.Size, now, built); err != nil {
 			return nil, fmt.Errorf("insert binary: %w", err)
 		}
 	case err != nil:
@@ -312,9 +324,9 @@ func (s *Service) AttachBinary(ctx context.Context, in AttachInput) (*AttachResu
 	default:
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE binaries
-			   SET binary_sha256 = ?, size = ?, uploaded_at = ?
+			   SET binary_sha256 = ?, size = ?, uploaded_at = ?, built = ?
 			 WHERE package_id = ? AND cell = ?
-		`, in.Binary.SHA256, in.Binary.Size, now, packageID, in.Cell); err != nil {
+		`, in.Binary.SHA256, in.Binary.Size, now, built, packageID, in.Cell); err != nil {
 			return nil, fmt.Errorf("update binary: %w", err)
 		}
 		result.Overwritten = true
@@ -339,11 +351,11 @@ func (s *Service) AttachBinary(ctx context.Context, in AttachInput) (*AttachResu
 	return result, nil
 }
 
-func insertPackageAndBinaries(ctx context.Context, tx *sql.Tx, in Input, now string) error {
+func insertPackageAndBinaries(ctx context.Context, tx *sql.Tx, in Input, fields string, built map[string]string, now string) error {
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO packages(channel, name, version, source_sha256, source_size, published_at, published_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, in.Channel, in.Name, in.Version, in.Source.SHA256, in.Source.Size, now, nullIfEmpty(in.Actor))
+		INSERT INTO packages(channel, name, version, source_sha256, source_size, published_at, published_by, index_fields)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, in.Channel, in.Name, in.Version, in.Source.SHA256, in.Source.Size, now, nullIfEmpty(in.Actor), fields)
 	if err != nil {
 		return err
 	}
@@ -351,15 +363,15 @@ func insertPackageAndBinaries(ctx context.Context, tx *sql.Tx, in Input, now str
 	if err != nil {
 		return err
 	}
-	return insertBinariesFor(ctx, tx, id, in.Binaries, now)
+	return insertBinariesFor(ctx, tx, id, in.Binaries, built, now)
 }
 
-func insertBinariesFor(ctx context.Context, tx *sql.Tx, packageID int64, binaries []BinaryInput, now string) error {
+func insertBinariesFor(ctx context.Context, tx *sql.Tx, packageID int64, binaries []BinaryInput, built map[string]string, now string) error {
 	for _, b := range binaries {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO binaries(package_id, cell, binary_sha256, size, uploaded_at)
-			VALUES (?, ?, ?, ?, ?)
-		`, packageID, b.Cell, b.Blob.SHA256, b.Blob.Size, now); err != nil {
+			INSERT INTO binaries(package_id, cell, binary_sha256, size, uploaded_at, built)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, packageID, b.Cell, b.Blob.SHA256, b.Blob.Size, now, built[b.Cell]); err != nil {
 			return err
 		}
 	}

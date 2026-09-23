@@ -22,71 +22,54 @@ import (
 // shouldn't happen in production but is easy to hit in tests.
 var errNoUpstreamFetcher = errors.New("no upstream fetcher configured on Deps")
 
-// handleSourcePackages serves GET /{channel}/src/contrib/PACKAGES.
-// Returns plain text; every access requires read:<channel> unless
-// anonymous reads are enabled and {channel} is the default.
-func handleSourcePackages(deps Deps) http.HandlerFunc {
+// The source surface. Each handler serves both the channel-named
+// route (/{channel}/src/contrib/…) and the default-channel alias
+// (/src/contrib/…); withChannel resolves which.
+//
+//	GET /{channel}/src/contrib/PACKAGES[.gz]
+//	GET /{channel}/src/contrib/{file}
+//	GET /{channel}/src/contrib/Archive/{pkg}/{file}
+
+func handleSourcePackages(deps Deps, gzipped bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		serveSourcePackages(w, r, deps, r.PathValue("channel"), false)
+		withChannel(w, r, deps, func(channel string) {
+			serveSourcePackages(w, r, deps, channel, gzipped)
+		})
 	}
 }
 
-// handleSourcePackagesGz serves the gzipped variant. Base R asks for
-// .gz first on a CRAN-protocol install; we build gz from the same
-// cached body so a mutation invalidates both views.
-func handleSourcePackagesGz(deps Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		serveSourcePackages(w, r, deps, r.PathValue("channel"), true)
-	}
-}
-
-// handleSourceTarball serves GET /{channel}/src/contrib/{file}.
 func handleSourceTarball(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		serveSourceTarball(w, r, deps, r.PathValue("channel"), r.PathValue("file"))
+		withChannel(w, r, deps, func(channel string) {
+			serveSourceTarball(w, r, deps, channel, "", r.PathValue("file"))
+		})
 	}
 }
 
-// handleDefaultSourcePackages / ...Gz / ...Tarball serve the alias
-// routes under /src/contrib/... — no channel in the URL. We resolve
-// the default from the DB and delegate to the same core logic as the
-// channel-named variants.
-func handleDefaultSourcePackages(deps Deps) http.HandlerFunc {
+func handleSourceArchiveTarball(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		serveSourcePackages(w, r, deps, ch, false)
+		withChannel(w, r, deps, func(channel string) {
+			serveSourceTarball(w, r, deps, channel, r.PathValue("pkg"), r.PathValue("file"))
+		})
 	}
 }
 
-func handleDefaultSourcePackagesGz(deps Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		serveSourcePackages(w, r, deps, ch, true)
+// withChannel calls fn with the request's channel: the {channel} path
+// segment when the route has one, else the default channel.
+func withChannel(w http.ResponseWriter, r *http.Request, deps Deps, fn func(channel string)) {
+	if ch := r.PathValue("channel"); ch != "" {
+		fn(ch)
+		return
 	}
+	ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
+	if herr != nil {
+		herr.write(w, r)
+		return
+	}
+	fn(ch)
 }
 
-func handleDefaultSourceTarball(deps Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ch, herr := resolveDefaultChannel(r.Context(), deps.DB.DB)
-		if herr != nil {
-			herr.write(w, r)
-			return
-		}
-		serveSourceTarball(w, r, deps, ch, r.PathValue("file"))
-	}
-}
-
-// serveSourcePackages is the shared core of the channel-named and
-// default-channel alias PACKAGES handlers. gzip=true switches response
-// type and body to PACKAGES.gz.
+// serveSourcePackages serves the source PACKAGES index.
 func serveSourcePackages(w http.ResponseWriter, r *http.Request, deps Deps, channel string, gzipped bool) {
 	if !requireReadScope(w, r, deps, channel) {
 		return
@@ -96,6 +79,11 @@ func serveSourcePackages(w http.ResponseWriter, r *http.Request, deps Deps, chan
 		herr.write(w, r)
 		return
 	}
+	writeIndexBody(w, r, body, gzipped)
+}
+
+// writeIndexBody writes a PACKAGES body, gzipped for PACKAGES.gz.
+func writeIndexBody(w http.ResponseWriter, r *http.Request, body []byte, gzipped bool) {
 	if gzipped {
 		gz, err := gzipBytes(body)
 		if err != nil {
@@ -113,39 +101,100 @@ func serveSourcePackages(w http.ResponseWriter, r *http.Request, deps Deps, chan
 	_, _ = w.Write(body)
 }
 
-// serveSourceTarball is the shared core of the channel-named and
-// default-channel alias tarball handlers.
-func serveSourceTarball(w http.ResponseWriter, r *http.Request, deps Deps, channel, file string) {
+// serveSourceTarball serves a source tarball. archivePkg is the {pkg}
+// segment of an Archive/ URL, "" for a plain src/contrib/{file}.
+// Both paths serve any stored version, current, archived or yanked:
+// clients differ in which one they try for a pinned version, so only
+// the indexes distinguish current from archived.
+func serveSourceTarball(w http.ResponseWriter, r *http.Request, deps Deps, channel, archivePkg, file string) {
 	if !requireReadScope(w, r, deps, channel) {
 		return
 	}
-	name, version, ok := parseSourceTarballFilename(file)
+	name, version, ok := parseTarballPath(archivePkg, file)
 	if !ok {
-		writeError(w, r, http.StatusNotFound,
-			CodeNotFound, "unknown resource",
-			"source tarballs are named <Package>_<Version>.tar.gz")
+		writeTarballNameError(w, r)
 		return
 	}
+	serveSourceVersion(w, r, deps, channel, name, version)
+}
+
+// serveSourceVersion streams the source tarball of name@version,
+// fetching it from upstream first on a proxy channel miss. Callers
+// have already checked read scope.
+func serveSourceVersion(w http.ResponseWriter, r *http.Request, deps Deps, channel, name, version string) {
 	sum, size, herr := lookupSourceBlob(r.Context(), deps.DB.DB, channel, name, version)
-	if herr != nil {
+	if herr != nil && herr.status == http.StatusNotFound {
 		// Proxy channels translate the local miss into an upstream
 		// fetch. On success we re-query and serve from CAS; on failure
 		// the upstream error replaces the local 404.
-		if herr.status == http.StatusNotFound {
-			if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
-				if herr2 := proxyFetchSourceTarball(r.Context(), deps, meta, name, version); herr2 != nil {
-					herr2.write(w, r)
-					return
-				}
-				sum, size, herr = lookupSourceBlob(r.Context(), deps.DB.DB, channel, name, version)
+		if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
+			if herr2 := proxyFetchSourceTarball(r.Context(), deps, meta, name, version); herr2 != nil {
+				herr2.write(w, r)
+				return
 			}
-		}
-		if herr != nil {
-			herr.write(w, r)
-			return
+			sum, size, herr = lookupSourceBlob(r.Context(), deps.DB.DB, channel, name, version)
 		}
 	}
+	if herr != nil {
+		herr.write(w, r)
+		return
+	}
 	serveBlob(w, r, deps, sum, size, "application/x-gzip")
+}
+
+// parseTarballPath parses {file} and, for Archive/{pkg}/{file} URLs,
+// checks that {pkg} names the same package.
+func parseTarballPath(archivePkg, file string) (name, version string, ok bool) {
+	name, version, ok = parseSourceTarballFilename(file)
+	if !ok || (archivePkg != "" && archivePkg != name) {
+		return "", "", false
+	}
+	return name, version, true
+}
+
+func writeTarballNameError(w http.ResponseWriter, r *http.Request) {
+	writeError(w, r, http.StatusNotFound, CodeNotFound, "unknown resource",
+		"tarballs are named <Package>_<Version>.tar.gz (under Archive/<Package>/ for archived versions)")
+}
+
+// requireChannel returns a 404 error when channel doesn't exist.
+func requireChannel(ctx context.Context, deps Deps, channel string) *httpError {
+	ok, err := channelExists(ctx, deps.DB.DB, channel)
+	if err != nil {
+		return internalErr("channel lookup", err)
+	}
+	if !ok {
+		return &httpError{
+			status: http.StatusNotFound,
+			code:   CodeNotFound,
+			msg:    fmt.Sprintf("channel %q not found", channel),
+		}
+	}
+	return nil
+}
+
+// noteProxyIndexRead records proxy index metrics and, when a stale
+// index was served because upstream was unreachable, an audit event.
+func noteProxyIndexRead(ctx context.Context, deps Deps, channel string, meta *channelMeta, stale bool) {
+	if !meta.IsProxy() {
+		return
+	}
+	if stale {
+		// Best-effort audit annotation; ignoring errors here keeps the
+		// happy path simple and the event row purely advisory.
+		_, _ = deps.DB.ExecContext(ctx, `
+			INSERT INTO events(type, channel, note)
+			VALUES ('proxy_index_stale_served', ?, 'PACKAGES upstream unreachable')
+		`, channel)
+	}
+	if deps.Metrics == nil {
+		return
+	}
+	outcome := "ok"
+	if stale {
+		outcome = "stale"
+	}
+	deps.Metrics.ProxyFetchTotal.WithLabelValues(channel, "index", outcome).Inc()
 }
 
 // proxyFetchSourceTarball fetches <name>_<version>.tar.gz from the
@@ -245,9 +294,8 @@ func parseSourceTarballFilename(file string) (name, version string, ok bool) {
 
 // lookupSourceBlob returns the source_sha256 and source_size for a
 // published (channel, name, version). Yanked rows are still served —
-// a lockfile pinned to a yanked version must still resolve, and the
-// Yanked: yes field in PACKAGES is the signal tools use. Missing rows
-// return 404.
+// a lockfile pinned to a yanked version must still resolve; yanking
+// only removes a version from PACKAGES. Missing rows return 404.
 func lookupSourceBlob(ctx context.Context, db *sql.DB, channel, name, version string) (sum string, size int64, herr *httpError) {
 	err := db.QueryRowContext(ctx, `
 		SELECT source_sha256, source_size
@@ -301,16 +349,8 @@ func serveBlob(w http.ResponseWriter, r *http.Request, deps Deps, sum string, si
 // loadSourcePackages is a thin wrapper over Index.GetSource that
 // converts "channel not found" into a 404.
 func loadSourcePackages(ctx context.Context, deps Deps, channel string) ([]byte, *httpError) {
-	ok, err := channelExists(ctx, deps.DB.DB, channel)
-	if err != nil {
-		return nil, internalErr("channel lookup", err)
-	}
-	if !ok {
-		return nil, &httpError{
-			status: http.StatusNotFound,
-			code:   CodeNotFound,
-			msg:    fmt.Sprintf("channel %q not found", channel),
-		}
+	if herr := requireChannel(ctx, deps, channel); herr != nil {
+		return nil, herr
 	}
 	meta := lookupChannelMeta(ctx, deps, channel)
 	body, stale, err := deps.Index.GetSource(ctx, channel, meta, deps.Upstream)
@@ -328,19 +368,7 @@ func loadSourcePackages(ctx context.Context, deps Deps, channel string) ([]byte,
 		}
 		return nil, internalErr("build packages", err)
 	}
-	if stale {
-		// Best-effort audit annotation; ignoring errors here keeps the
-		// happy path simple and the event row purely advisory.
-		_, _ = deps.DB.ExecContext(ctx, `
-			INSERT INTO events(type, channel, note)
-			VALUES ('proxy_index_stale_served', ?, 'source PACKAGES upstream unreachable')
-		`, channel)
-		if deps.Metrics != nil {
-			deps.Metrics.ProxyFetchTotal.WithLabelValues(channel, "index", "stale").Inc()
-		}
-	} else if meta.IsProxy() && deps.Metrics != nil {
-		deps.Metrics.ProxyFetchTotal.WithLabelValues(channel, "index", "ok").Inc()
-	}
+	noteProxyIndexRead(ctx, deps, channel, meta, stale)
 	return body, nil
 }
 

@@ -89,19 +89,26 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/openapi.json", handleOpenAPIJSON(deps))
 	mux.HandleFunc("GET /api/v1/openapi.yaml", handleOpenAPIYAML(deps))
 
-	// CRAN-protocol source surface. {channel} is the first path segment
-	// so `repos = "http://packyard/<channel>"` Just Works with vanilla R —
+	// CRAN-protocol surface. {channel} is the first path segment so
+	// `repos = "http://packyard/<channel>"` Just Works with vanilla R —
 	// R's contrib.url() appends "/src/contrib/PACKAGES" on its own.
-	mux.HandleFunc("GET /{channel}/src/contrib/PACKAGES", handleSourcePackages(deps))
-	mux.HandleFunc("GET /{channel}/src/contrib/PACKAGES.gz", handleSourcePackagesGz(deps))
-	mux.HandleFunc("GET /{channel}/src/contrib/{file}", handleSourceTarball(deps))
+	// Binaries live under /__linux__/{distro}/{snapshot}/, the URL shape
+	// Posit Package Manager uses and Workbench/Connect images expect.
+	// Every route also exists without {channel} for the default
+	// channel; the handlers tell the two apart via PathValue.
+	for _, prefix := range []string{"/{channel}", ""} {
+		src := prefix + "/src/contrib"
+		mux.HandleFunc("GET "+src+"/PACKAGES", handleSourcePackages(deps, false))
+		mux.HandleFunc("GET "+src+"/PACKAGES.gz", handleSourcePackages(deps, true))
+		mux.HandleFunc("GET "+src+"/{file}", handleSourceTarball(deps))
+		mux.HandleFunc("GET "+src+"/Archive/{pkg}/{file}", handleSourceArchiveTarball(deps))
 
-	// CRAN-protocol binary surface. Only Linux is served directly in
-	// the URL shape; macOS and Windows binaries weren't on packyard's
-	// v1 target platforms.
-	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/PACKAGES", handleBinaryPackages(deps))
-	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/PACKAGES.gz", handleBinaryPackagesGz(deps))
-	mux.HandleFunc("GET /{channel}/bin/linux/{cell}/{file}", handleBinaryTarball(deps))
+		linux := prefix + "/__linux__/{distro}/{snapshot}/src/contrib"
+		mux.HandleFunc("GET "+linux+"/PACKAGES", handleLinuxPackages(deps, false))
+		mux.HandleFunc("GET "+linux+"/PACKAGES.gz", handleLinuxPackages(deps, true))
+		mux.HandleFunc("GET "+linux+"/{file}", handleLinuxTarball(deps))
+		mux.HandleFunc("GET "+linux+"/Archive/{pkg}/{file}", handleLinuxArchiveTarball(deps))
+	}
 
 	// Operator dashboard. Mounted under /ui/ so an operator can point a
 	// browser at the same host that serves the API. Disabled when no
@@ -138,15 +145,6 @@ func NewMux(deps Deps) http.Handler {
 			mux.Handle("GET /ui/static/", stripped)
 		}
 	}
-
-	// Default-channel aliases: `repos = "http://packyard/"` works the
-	// same as naming the default channel explicitly.
-	mux.HandleFunc("GET /src/contrib/PACKAGES", handleDefaultSourcePackages(deps))
-	mux.HandleFunc("GET /src/contrib/PACKAGES.gz", handleDefaultSourcePackagesGz(deps))
-	mux.HandleFunc("GET /src/contrib/{file}", handleDefaultSourceTarball(deps))
-	mux.HandleFunc("GET /bin/linux/{cell}/PACKAGES", handleDefaultBinaryPackages(deps))
-	mux.HandleFunc("GET /bin/linux/{cell}/PACKAGES.gz", handleDefaultBinaryPackagesGz(deps))
-	mux.HandleFunc("GET /bin/linux/{cell}/{file}", handleDefaultBinaryTarball(deps))
 
 	return chain(mux,
 		requestIDMiddleware,

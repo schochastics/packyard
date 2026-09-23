@@ -878,19 +878,28 @@ paths:
               schema: { $ref: '#/components/schemas/ListCellsResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
-  # ---- CRAN-protocol source reads -----------------------------------
+  # ---- CRAN-protocol reads -------------------------------------------
   #
   # URL shape matches what R's contrib.url() builds from
   #   options(repos = "http://packyard/<channel>")
-  # so install.packages() "just works". Default-channel aliases (no
-  # /{channel} prefix) route to the is_default=1 channel.
+  # so install.packages() "just works". Linux binaries are served the
+  # way Posit Package Manager serves them, under
+  #   /<channel>/__linux__/<distro>/latest/src/contrib/
+  # where the client's R version (from its User-Agent) picks the cell
+  # and packages without a binary for it are served as source.
   #
-  # Scope: read:<channel>. Unauthenticated reads to the default channel
-  # are permitted only when the server's allow_anonymous_reads config
-  # flag is true.
+  # PACKAGES lists only the highest non-yanked version of each package;
+  # every stored version stays downloadable from src/contrib/<file> and
+  # src/contrib/Archive/<pkg>/<file>.
+  #
+  # Every route also exists without the /{channel} prefix, resolving to
+  # the default channel. OpenAPI 3 can't express an optional leading
+  # path segment, so the aliases are listed separately.
+  #
+  # Scope: read:<channel>, unless the channel allows anonymous reads.
   /{channel}/src/contrib/PACKAGES:
     get:
-      summary: Source PACKAGES DCF index
+      summary: Source PACKAGES index
       operationId: getSourcePackages
       tags: [cran]
       parameters:
@@ -926,8 +935,9 @@ paths:
 
   /{channel}/src/contrib/{file}:
     get:
-      summary: Download a source tarball
-      description: '{file} must match `<Package>_<Version>.tar.gz`.'
+      summary: Download a tarball
+      description: |
+        Any stored version is served, including archived and yanked ones.
       operationId: getSourceTarball
       tags: [cran]
       parameters:
@@ -935,14 +945,11 @@ paths:
         - name: file
           in: path
           required: true
+          description: '`<Package>_<Version>.tar.gz`'
           schema: { type: string }
       responses:
         '200':
-          description: Source tarball bytes.
-          headers:
-            ETag:
-              schema: { type: string }
-              description: '"<sha256>" — content-addressable, safe for caching.'
+          description: Tarball bytes. ETag is the sha256.
           content:
             application/x-gzip:
               schema:
@@ -952,21 +959,65 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  # ---- CRAN-protocol binary reads (Linux only) ----------------------
-  /{channel}/bin/linux/{cell}/PACKAGES:
+  /{channel}/src/contrib/Archive/{pkg}/{file}:
     get:
-      summary: Binary PACKAGES for a cell
-      operationId: getBinaryPackages
+      summary: Download an archived version
+      description: |
+        Same content as {file} directly under src/contrib; CRAN clients
+        look for non-current versions here.
+      operationId: getSourceArchiveTarball
       tags: [cran]
       parameters:
         - $ref: '#/components/parameters/ChannelPath'
-        - name: cell
+        - name: pkg
           in: path
           required: true
+          description: Package name; must match the name in {file}.
+          schema: { type: string }
+        - name: file
+          in: path
+          required: true
+          description: '`<Package>_<Version>.tar.gz`'
           schema: { type: string }
       responses:
         '200':
-          description: DCF-formatted binary PACKAGES.
+          description: Tarball bytes.
+          content:
+            application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /{channel}/__linux__/{distro}/{snapshot}/src/contrib/PACKAGES:
+    get:
+      summary: Linux PACKAGES index
+      description: |
+        Entries describe the binary for the client's cell when one exists
+        (with its Built field), the source tarball otherwise.
+      operationId: getLinuxPackages
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - name: distro
+          in: path
+          required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
+          schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
+      responses:
+        '200':
+          description: DCF-formatted PACKAGES body.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
           content:
             text/plain:
               schema: { type: string }
@@ -974,20 +1025,30 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /{channel}/bin/linux/{cell}/PACKAGES.gz:
+  /{channel}/__linux__/{distro}/{snapshot}/src/contrib/PACKAGES.gz:
     get:
-      summary: Gzipped binary PACKAGES
-      operationId: getBinaryPackagesGz
+      summary: Gzipped linux PACKAGES
+      operationId: getLinuxPackagesGz
       tags: [cran]
       parameters:
         - $ref: '#/components/parameters/ChannelPath'
-        - name: cell
+        - name: distro
           in: path
           required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
           schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
       responses:
         '200':
-          description: gzip-compressed binary PACKAGES.
+          description: gzip-compressed PACKAGES body.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
           content:
             application/gzip:
               schema:
@@ -997,24 +1058,39 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /{channel}/bin/linux/{cell}/{file}:
+  /{channel}/__linux__/{distro}/{snapshot}/src/contrib/{file}:
     get:
-      summary: Download a binary tarball
-      operationId: getBinaryTarball
+      summary: Download a tarball
+      description: |
+        Serves the binary for the client's cell when one exists for this
+        version, the source tarball otherwise. Any stored version is served,
+        including archived and yanked ones.
+      operationId: getLinuxTarball
       tags: [cran]
       parameters:
         - $ref: '#/components/parameters/ChannelPath'
-        - name: cell
+        - name: distro
           in: path
           required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
           schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
         - name: file
           in: path
           required: true
+          description: '`<Package>_<Version>.tar.gz`'
           schema: { type: string }
       responses:
         '200':
-          description: Binary tarball bytes.
+          description: Tarball bytes. ETag is the sha256.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
           content:
             application/x-gzip:
               schema:
@@ -1024,13 +1100,55 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  # ---- Default-channel aliases --------------------------------------
-  # Same semantics as the channel-prefixed routes above but resolve to
-  # the DB-marked default channel. Documented as separate paths because
-  # OpenAPI 3 doesn't support "this channel is optional in the URL".
+  /{channel}/__linux__/{distro}/{snapshot}/src/contrib/Archive/{pkg}/{file}:
+    get:
+      summary: Download an archived version
+      description: |
+        Same content as {file} directly under src/contrib; CRAN clients
+        look for non-current versions here.
+      operationId: getLinuxArchiveTarball
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - name: distro
+          in: path
+          required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
+          schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
+        - name: pkg
+          in: path
+          required: true
+          description: Package name; must match the name in {file}.
+          schema: { type: string }
+        - name: file
+          in: path
+          required: true
+          description: '`<Package>_<Version>.tar.gz`'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Tarball bytes.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
+          content:
+            application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /src/contrib/PACKAGES:
     get:
-      summary: Source PACKAGES (default channel)
+      summary: Source PACKAGES index (default channel)
       operationId: getDefaultSourcePackages
       tags: [cran]
       responses:
@@ -1041,6 +1159,7 @@ paths:
               schema: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /src/contrib/PACKAGES.gz:
     get:
@@ -1057,20 +1176,24 @@ paths:
                 format: binary
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /src/contrib/{file}:
     get:
-      summary: Download a source tarball (default channel)
+      summary: Download a tarball (default channel)
+      description: |
+        Any stored version is served, including archived and yanked ones.
       operationId: getDefaultSourceTarball
       tags: [cran]
       parameters:
         - name: file
           in: path
           required: true
+          description: '`<Package>_<Version>.tar.gz`'
           schema: { type: string }
       responses:
         '200':
-          description: Source tarball bytes.
+          description: Tarball bytes. ETag is the sha256.
           content:
             application/x-gzip:
               schema:
@@ -1080,19 +1203,63 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /bin/linux/{cell}/PACKAGES:
+  /src/contrib/Archive/{pkg}/{file}:
     get:
-      summary: Binary PACKAGES for a cell (default channel)
-      operationId: getDefaultBinaryPackages
+      summary: Download an archived version (default channel)
+      description: |
+        Same content as {file} directly under src/contrib; CRAN clients
+        look for non-current versions here.
+      operationId: getDefaultSourceArchiveTarball
       tags: [cran]
       parameters:
-        - name: cell
+        - name: pkg
           in: path
           required: true
+          description: Package name; must match the name in {file}.
+          schema: { type: string }
+        - name: file
+          in: path
+          required: true
+          description: '`<Package>_<Version>.tar.gz`'
           schema: { type: string }
       responses:
         '200':
-          description: DCF-formatted binary PACKAGES.
+          description: Tarball bytes.
+          content:
+            application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /__linux__/{distro}/{snapshot}/src/contrib/PACKAGES:
+    get:
+      summary: Linux PACKAGES index (default channel)
+      description: |
+        Entries describe the binary for the client's cell when one exists
+        (with its Built field), the source tarball otherwise.
+      operationId: getDefaultLinuxPackages
+      tags: [cran]
+      parameters:
+        - name: distro
+          in: path
+          required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
+          schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
+      responses:
+        '200':
+          description: DCF-formatted PACKAGES body.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
           content:
             text/plain:
               schema: { type: string }
@@ -1100,19 +1267,29 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /bin/linux/{cell}/PACKAGES.gz:
+  /__linux__/{distro}/{snapshot}/src/contrib/PACKAGES.gz:
     get:
-      summary: Gzipped binary PACKAGES (default channel)
-      operationId: getDefaultBinaryPackagesGz
+      summary: Gzipped linux PACKAGES (default channel)
+      operationId: getDefaultLinuxPackagesGz
       tags: [cran]
       parameters:
-        - name: cell
+        - name: distro
           in: path
           required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
           schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
       responses:
         '200':
-          description: gzip-compressed binary PACKAGES.
+          description: gzip-compressed PACKAGES body.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
           content:
             application/gzip:
               schema:
@@ -1122,23 +1299,83 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /bin/linux/{cell}/{file}:
+  /__linux__/{distro}/{snapshot}/src/contrib/{file}:
     get:
-      summary: Download a binary tarball (default channel)
-      operationId: getDefaultBinaryTarball
+      summary: Download a tarball (default channel)
+      description: |
+        Serves the binary for the client's cell when one exists for this
+        version, the source tarball otherwise. Any stored version is served,
+        including archived and yanked ones.
+      operationId: getDefaultLinuxTarball
       tags: [cran]
       parameters:
-        - name: cell
+        - name: distro
           in: path
           required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
+          schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
+        - name: file
+          in: path
+          required: true
+          description: '`<Package>_<Version>.tar.gz`'
+          schema: { type: string }
+      responses:
+        '200':
+          description: Tarball bytes. ETag is the sha256.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
+          content:
+            application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /__linux__/{distro}/{snapshot}/src/contrib/Archive/{pkg}/{file}:
+    get:
+      summary: Download an archived version (default channel)
+      description: |
+        Same content as {file} directly under src/contrib; CRAN clients
+        look for non-current versions here.
+      operationId: getDefaultLinuxArchiveTarball
+      tags: [cran]
+      parameters:
+        - name: distro
+          in: path
+          required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
+          schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
+        - name: pkg
+          in: path
+          required: true
+          description: Package name; must match the name in {file}.
           schema: { type: string }
         - name: file
           in: path
           required: true
+          description: '`<Package>_<Version>.tar.gz`'
           schema: { type: string }
       responses:
         '200':
-          description: Binary tarball bytes.
+          description: Tarball bytes.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
           content:
             application/x-gzip:
               schema:

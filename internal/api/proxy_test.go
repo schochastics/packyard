@@ -109,6 +109,11 @@ func newProxyFixture(t *testing.T) *proxyFixture {
 
 func (f *proxyFixture) authedGet(t *testing.T, path string) *http.Response {
 	t.Helper()
+	return f.authedGetUA(t, path, "")
+}
+
+func (f *proxyFixture) authedGetUA(t *testing.T, path, ua string) *http.Response {
+	t.Helper()
 	// Seed a read:* token on demand.
 	token := seedTokenRow(t, f.deps.DB.DB, "test", "read:*", false)
 	req, err := http.NewRequest(http.MethodGet, f.srv.URL+path, nil)
@@ -116,6 +121,9 @@ func (f *proxyFixture) authedGet(t *testing.T, path string) *http.Response {
 		t.Fatal(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	if ua != "" {
+		req.Header.Set("User-Agent", ua)
+	}
 	resp, err := f.srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +222,7 @@ func TestProxyBinaryTarballMaterializesSourceFirst(t *testing.T) {
 		_, _ = io.WriteString(w, "foo-binary-jammy")
 	})
 
-	resp := f.authedGet(t, "/cran/bin/linux/r-4.4/foo_1.0.0.tar.gz")
+	resp := f.authedGetUA(t, "/cran/__linux__/jammy/latest/src/contrib/foo_1.0.0.tar.gz", "R (4.4.3 x86_64-pc-linux-gnu x86_64 linux-gnu)")
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
@@ -240,19 +248,23 @@ func TestProxyBinaryTarballMaterializesSourceFirst(t *testing.T) {
 	}
 }
 
-func TestProxyBinaryCellWithoutUpstream404(t *testing.T) {
+func TestProxyBinaryCellWithoutUpstreamFallsBackToSource(t *testing.T) {
 	t.Parallel()
 	f := newProxyFixture(t)
-	// We only configured upstream binary for r-4.4.
-	// Add a cell to matrix that we DON'T proxy.
-	f.deps.Matrix.Cells = append(f.deps.Matrix.Cells, config.Cell{
-		Name: "r-4.4", RMinor: "4.4",
+	// Upstream binaries are only configured for r-4.4. An R 4.5 client
+	// resolves to a cell with no upstream and gets the source tarball.
+	f.deps.Matrix.Cells = append(f.deps.Matrix.Cells, config.Cell{Name: "r-4.5", RMinor: "4.5"})
+	f.upMux.HandleFunc("/src/contrib/foo_1.0.0.tar.gz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "foo-source")
 	})
 
-	resp := f.authedGet(t, "/cran/bin/linux/r-4.4/foo_1.0.0.tar.gz")
+	resp := f.authedGetUA(t, "/cran/__linux__/jammy/latest/src/contrib/foo_1.0.0.tar.gz", "R (4.5.1 x86_64-pc-linux-gnu x86_64 linux-gnu)")
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if got, _ := io.ReadAll(resp.Body); string(got) != "foo-source" {
+		t.Errorf("body = %q, want foo-source", got)
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 // The fixture makes "prod" the default channel (immutable). These tests
-// exercise the /src/contrib/... and /bin/linux/... alias routes.
+// exercise the /src/contrib/... and /__linux__/... alias routes.
 
 func TestDefaultAliasSourcePACKAGES(t *testing.T) {
 	t.Parallel()
@@ -48,17 +48,22 @@ func TestDefaultAliasSourceTarball(t *testing.T) {
 	}
 }
 
-func TestDefaultAliasBinaryPACKAGES(t *testing.T) {
+func TestDefaultAliasLinuxPACKAGES(t *testing.T) {
 	t.Parallel()
 
 	fx := newPublishFixture(t)
 	publishWithBinary(t, fx, "prod", "alpha", "1.0.0", "r-4.4")
 
-	rec := getURL(t, fx, "/bin/linux/r-4.4/PACKAGES", fx.token)
+	rec := getLinux(t, fx, "/__linux__/jammy/latest/src/contrib/PACKAGES", fx.token, rUA("4.4.3"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "Package: alpha") {
-		t.Errorf("alpha missing: %q", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "Package: alpha\nVersion: 1.0.0\nBuilt:") {
+		t.Errorf("alpha binary entry missing: %q", rec.Body.String())
+	}
+
+	rec = getLinux(t, fx, "/__linux__/jammy/latest/src/contrib/Archive/alpha/alpha_1.0.0.tar.gz", fx.token, rUA("4.4.3"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("archive alias: status = %d body %s", rec.Code, rec.Body.String())
 	}
 }

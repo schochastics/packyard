@@ -24,6 +24,7 @@ import (
 	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
 	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 	"gitea.cynkra.com/david.schoch/packyard/internal/db"
+	"gitea.cynkra.com/david.schoch/packyard/internal/store"
 	"gitea.cynkra.com/david.schoch/packyard/internal/version"
 )
 
@@ -249,9 +250,18 @@ func runServe(cfg *config.ServerConfig) error {
 		printReconcile(rec)
 	}
 
-	store, err := cas.New(filepath.Join(cfg.DataDir, "cas"))
+	casStore, err := cas.New(filepath.Join(cfg.DataDir, "cas"))
 	if err != nil {
 		return fmt.Errorf("prepare cas: %w", err)
+	}
+
+	// Rows stored before DESCRIPTION metadata was recorded get it
+	// filled in once; later starts find nothing to do.
+	storeSvc := store.New(database.DB, casStore)
+	if bf, err := storeSvc.BackfillMetadata(context.Background()); err != nil {
+		return fmt.Errorf("backfill package metadata: %w", err)
+	} else if bf.Packages+bf.Binaries > 0 {
+		slog.Info("backfilled package metadata", "packages", bf.Packages, "binaries", bf.Binaries)
 	}
 
 	uiKey, err := loadOrCreateUISessionKey(cfg.DataDir)
@@ -265,7 +275,8 @@ func runServe(cfg *config.ServerConfig) error {
 
 	deps := api.Deps{
 		DB:              database,
-		CAS:             store,
+		CAS:             casStore,
+		Store:           storeSvc,
 		Matrix:          matrix,
 		Channels:        channels,
 		Server:          cfg,

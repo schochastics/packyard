@@ -4,28 +4,35 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/rpkg"
+	"gitea.cynkra.com/david.schoch/packyard/internal/rversion"
 	"gitea.cynkra.com/david.schoch/packyard/internal/upstream"
 )
 
-// Ways the CRAN-protocol read surface differs from strict CRAN:
+// How the CRAN-protocol index is built for local channels:
 //
-//   - All versions of a package appear in PACKAGES, not just the latest.
-//     CRAN keeps older versions in /Archive/; packyard is simpler. R's
-//     available.packages() will dedupe (keeping the lex-max version),
-//     which works for the common case of monotonically increasing
-//     versions and is documented as a known quirk otherwise.
-//   - Yanked rows are included with "Yanked: yes". Base R ignores the
-//     field and will still install them if they happen to be the
-//     lex-max; pak/renv-aware tooling can honor the flag. Yanking is
-//     meant for safety flagging, not removal — use delete for that.
-//   - We ship PACKAGES only. PACKAGES.gz is derived on request; we
-//     skip PACKAGES.rds entirely, which base R doesn't need.
+//   - PACKAGES lists exactly one stanza per package: its highest
+//     non-yanked version by R's package_version ordering. Older and
+//     yanked versions stay downloadable (src/contrib/<file> and
+//     src/contrib/Archive/<pkg>/<file>) and are listed in
+//     Meta/archive.rds, as on CRAN.
+//   - Stanzas carry the standard repository fields from the package's
+//     DESCRIPTION (Depends, Imports, LinkingTo, …; see
+//     rpkg.IndexFields) so install.packages() resolves dependencies
+//     within the repository.
+//   - The /__linux__/{distro}/latest/ index lists the same packages;
+//     an entry describes the binary for the client's cell when one
+//     exists (adding its Built field) and the source tarball
+//     otherwise.
+//   - Proxy channels pass the upstream index through unchanged.
 
 // Index generates and caches PACKAGES-file bodies served from the
 // CRAN-protocol routes. Entries are keyed by (kind, channel[, cell])
@@ -54,12 +61,15 @@ func NewIndex(db *sql.DB) *Index {
 	}
 }
 
-// SourceKey / BinaryKey shape a cache key. Kept unexported so the only
-// way to populate the index is via Get* methods.
-func sourceKey(channel string) string        { return "src:" + channel }
-func binaryKey(channel, cell string) string  { return "bin:" + channel + ":" + cell }
-func keysForChannel(channel string) []string { return []string{sourceKey(channel)} }
-func binaryKeyPrefix(channel string) string  { return "bin:" + channel + ":" }
+// Cache keys start with the channel name and a NUL separator, so
+// InvalidateChannel can drop every view of one channel by prefix.
+// Channel names can't contain NUL.
+func channelKeyPrefix(channel string) string { return channel + "\x00" }
+func sourceKey(channel string) string        { return channelKeyPrefix(channel) + "src" }
+
+// linuxKey keys the /__linux__/ index for a cell; cell == "" is the
+// all-source view served to R versions without a cell.
+func linuxKey(channel, cell string) string { return channelKeyPrefix(channel) + "linux:" + cell }
 
 // GetSource returns the source PACKAGES body for channel.
 //
@@ -80,14 +90,35 @@ func (i *Index) GetSource(ctx context.Context, channel string, meta *channelMeta
 	return body, false, err
 }
 
-// GetBinary returns the binary PACKAGES body for (channel, cell).
-// See [Index.GetSource] for the proxy/stale semantics.
-func (i *Index) GetBinary(ctx context.Context, channel, cell, rMinor string, meta *channelMeta, fetcher *upstream.Fetcher) (body []byte, stale bool, err error) {
+// GetLinux returns the /__linux__/ PACKAGES body for channel as seen
+// by a client resolved to cell (nil: no binaries for the client's R
+// version, so every entry is a source entry). See [Index.GetSource]
+// for the proxy/stale semantics; a proxy channel serves the upstream
+// binary index configured for the cell, else its source index.
+func (i *Index) GetLinux(ctx context.Context, channel string, cell *config.Cell, arch string, meta *channelMeta, fetcher *upstream.Fetcher) (body []byte, stale bool, err error) {
 	if meta.IsProxy() {
-		return i.getBinaryProxy(ctx, channel, cell, meta.Upstream, fetcher)
+		if cell != nil {
+			if base := meta.Upstream.BinaryURLs[cell.Name]; base != "" {
+				return i.getProxyIndex(ctx, linuxKey(channel, cell.Name), base, meta.Upstream.IndexTTL, meta.Upstream.Timeout, fetcher)
+			}
+		}
+		return i.getSourceProxy(ctx, channel, meta.Upstream, fetcher)
 	}
-	body, err = i.getBinaryLocal(ctx, channel, cell, rMinor)
-	return body, false, err
+	cellName := ""
+	if cell != nil {
+		cellName = cell.Name
+	}
+	key := linuxKey(channel, cellName)
+	if body, ok := i.lookup(key); ok {
+		return body, false, nil
+	}
+	rows, err := i.latestRows(ctx, channel, cellName)
+	if err != nil {
+		return nil, false, err
+	}
+	body = formatPackages(rows, cell, arch)
+	i.storeWithTTL(key, body, i.ttl)
+	return body, false, nil
 }
 
 func (i *Index) getSourceLocal(ctx context.Context, channel string) ([]byte, error) {
@@ -103,32 +134,8 @@ func (i *Index) getSourceLocal(ctx context.Context, channel string) ([]byte, err
 	return body, nil
 }
 
-func (i *Index) getBinaryLocal(ctx context.Context, channel, cell, rMinor string) ([]byte, error) {
-	key := binaryKey(channel, cell)
-	if body, ok := i.lookup(key); ok {
-		return body, nil
-	}
-	body, err := i.buildBinary(ctx, channel, cell, rMinor)
-	if err != nil {
-		return nil, err
-	}
-	i.storeWithTTL(key, body, i.ttl)
-	return body, nil
-}
-
 func (i *Index) getSourceProxy(ctx context.Context, channel string, up upstreamView, fetcher *upstream.Fetcher) ([]byte, bool, error) {
 	return i.getProxyIndex(ctx, sourceKey(channel), up.SourceURL, up.IndexTTL, up.Timeout, fetcher)
-}
-
-func (i *Index) getBinaryProxy(ctx context.Context, channel, cell string, up upstreamView, fetcher *upstream.Fetcher) ([]byte, bool, error) {
-	base, ok := up.BinaryURLs[cell]
-	if !ok || base == "" {
-		// No upstream configured for this cell — surface as "PACKAGES
-		// is empty" so R clients can still ask the source PACKAGES
-		// for the same channel and fall back to compile-from-source.
-		return []byte{}, false, nil
-	}
-	return i.getProxyIndex(ctx, binaryKey(channel, cell), base, up.IndexTTL, up.Timeout, fetcher)
 }
 
 // getProxyIndex is the shared "fetch from upstream with TTL +
@@ -160,19 +167,16 @@ func (i *Index) getProxyIndex(ctx context.Context, key, baseURL string, ttl, tim
 // Upstream without importing the api package's internal types.
 type upstreamView = config.UpstreamConfig
 
-// InvalidateChannel drops all cached entries for channel — both the
-// source PACKAGES and every (channel, *) binary PACKAGES. Called by
-// publish, yank, and delete handlers on success so the next read
+// InvalidateChannel drops every cached view of channel: source
+// PACKAGES, each /__linux__/ variant and Meta/archive.rds. Called by
+// publish, yank, delete and attach on success so the next read
 // reflects the new state without waiting for TTL.
 func (i *Index) InvalidateChannel(channel string) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	for _, k := range keysForChannel(channel) {
-		delete(i.entries, k)
-	}
-	prefix := binaryKeyPrefix(channel)
+	prefix := channelKeyPrefix(channel)
 	for k := range i.entries {
-		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+		if strings.HasPrefix(k, prefix) {
 			delete(i.entries, k)
 		}
 	}
@@ -222,134 +226,125 @@ func (i *Index) storeWithTTL(key string, body []byte, ttl time.Duration) {
 	}
 }
 
-// indexRow is one (name, version, yanked) triple used during body
-// generation.
+// indexRow is one package version as the index sees it.
 type indexRow struct {
 	Name    string
 	Version string
 	Yanked  bool
+	// Fields are the DESCRIPTION index fields (rpkg.IndexFields).
+	Fields map[string]string
+	// HasBinary / Built describe the binary for the requested cell,
+	// when one was asked for and exists.
+	HasBinary bool
+	Built     string
 }
 
-// buildSource runs the DB query and formats a PACKAGES body for a
-// channel's source packages.
+// buildSource formats the source PACKAGES body for a local channel.
 func (i *Index) buildSource(ctx context.Context, channel string) ([]byte, error) {
-	rows, err := i.db.QueryContext(ctx, `
-		SELECT name, version, yanked
-		FROM packages
-		WHERE channel = ?
-		ORDER BY name, version
-	`, channel)
+	rows, err := i.latestRows(ctx, channel, "")
 	if err != nil {
-		return nil, fmt.Errorf("index: query source: %w", err)
+		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-
-	out := []indexRow{}
-	for rows.Next() {
-		var r indexRow
-		var yanked int
-		if err := rows.Scan(&r.Name, &r.Version, &yanked); err != nil {
-			return nil, fmt.Errorf("index: scan source: %w", err)
-		}
-		r.Yanked = yanked == 1
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("index: iterate source: %w", err)
-	}
-	return formatSourcePackages(out), nil
+	return formatPackages(rows, nil, ""), nil
 }
 
-// buildBinary is buildSource's binary-per-cell counterpart. A row
-// appears in the binary PACKAGES only if a binary for (package, cell)
-// exists.
-func (i *Index) buildBinary(ctx context.Context, channel, cell, rMinor string) ([]byte, error) {
+// channelRows returns every version of every package in channel,
+// joined to the binary for cell ("" joins nothing).
+func (i *Index) channelRows(ctx context.Context, channel, cell string) ([]indexRow, error) {
 	rows, err := i.db.QueryContext(ctx, `
-		SELECT p.name, p.version, p.yanked
+		SELECT p.name, p.version, p.yanked, p.index_fields,
+		       b.id IS NOT NULL, b.built
 		FROM packages p
-		JOIN binaries b ON b.package_id = p.id AND b.cell = ?
+		LEFT JOIN binaries b ON b.package_id = p.id AND b.cell = ?
 		WHERE p.channel = ?
-		ORDER BY p.name, p.version
 	`, cell, channel)
 	if err != nil {
-		return nil, fmt.Errorf("index: query binary: %w", err)
+		return nil, fmt.Errorf("index: query: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	out := []indexRow{}
 	for rows.Next() {
-		var r indexRow
-		var yanked int
-		if err := rows.Scan(&r.Name, &r.Version, &yanked); err != nil {
-			return nil, fmt.Errorf("index: scan binary: %w", err)
+		var (
+			r      indexRow
+			yanked int
+			fields sql.NullString
+			built  sql.NullString
+		)
+		if err := rows.Scan(&r.Name, &r.Version, &yanked, &fields, &r.HasBinary, &built); err != nil {
+			return nil, fmt.Errorf("index: scan: %w", err)
 		}
 		r.Yanked = yanked == 1
+		r.Built = built.String
+		if fields.Valid && fields.String != "" {
+			// A malformed value (hand-edited DB) degrades to a
+			// Package/Version-only stanza rather than failing the
+			// whole index.
+			_ = json.Unmarshal([]byte(fields.String), &r.Fields)
+		}
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("index: iterate binary: %w", err)
+		return nil, fmt.Errorf("index: iterate: %w", err)
 	}
-	return formatBinaryPackages(out, rMinor), nil
+	return out, nil
 }
 
-// formatSourcePackages writes one DCF stanza per row.
-//
-// Minimum-viable stanza for v1: Package, Version, Yanked (when set).
-// Richer fields (Depends, Imports, MD5sum, etc.) require parsing
-// DESCRIPTION files from tarballs and land in v1.x. Base R tolerates
-// missing fields — install.packages() still works, and dependency
-// resolution for packyard→CRAN deps works when CRAN is in the repos
-// list. packyard→packyard dep resolution requires the richer PACKAGES
-// file; document this trade-off in docs/quickstart.md.
-func formatSourcePackages(rows []indexRow) []byte {
-	// Stable output: already ordered by SQL, but defensively sort so
-	// tests don't rely on SQLite's ordering semantics.
-	sort.Slice(rows, func(a, b int) bool {
-		if rows[a].Name != rows[b].Name {
-			return rows[a].Name < rows[b].Name
+// latestRows keeps, per package, the highest non-yanked version.
+// Packages whose every version is yanked drop out of the index.
+func (i *Index) latestRows(ctx context.Context, channel, cell string) ([]indexRow, error) {
+	all, err := i.channelRows(ctx, channel, cell)
+	if err != nil {
+		return nil, err
+	}
+	best := map[string]indexRow{}
+	for _, r := range all {
+		if r.Yanked {
+			continue
 		}
-		return rows[a].Version < rows[b].Version
-	})
+		if cur, ok := best[r.Name]; !ok || rversion.Compare(r.Version, cur.Version) > 0 {
+			best[r.Name] = r
+		}
+	}
+	out := make([]indexRow, 0, len(best))
+	for _, r := range best {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
+	return out, nil
+}
 
+// archTriples maps matrix.yaml arch values to the platform triple R
+// writes into a binary's Built field.
+var archTriples = map[string]string{
+	"amd64": "x86_64-pc-linux-gnu",
+	"arm64": "aarch64-unknown-linux-gnu",
+}
+
+// formatPackages writes one DCF stanza per row. cell is the cell the
+// client resolved to (nil for the plain source index); rows with a
+// binary for it get a Built field so R treats the tarball as built.
+func formatPackages(rows []indexRow, cell *config.Cell, arch string) []byte {
 	var buf bytes.Buffer
-	for i, r := range rows {
-		if i > 0 {
+	for n, r := range rows {
+		if n > 0 {
 			buf.WriteByte('\n')
 		}
 		fmt.Fprintf(&buf, "Package: %s\n", r.Name)
 		fmt.Fprintf(&buf, "Version: %s\n", r.Version)
-		if r.Yanked {
-			// "yes"/"no" is DCF's canonical boolean. See R's
-			// tools::.read_description() for how PACKAGES is parsed.
-			buf.WriteString("Yanked: yes\n")
+		for _, f := range rpkg.IndexFields {
+			if v := r.Fields[f]; v != "" {
+				fmt.Fprintf(&buf, "%s: %s\n", f, v)
+			}
 		}
-	}
-	return buf.Bytes()
-}
-
-// formatBinaryPackages includes a "Built:" field so R recognizes the
-// tarball as a pre-built binary for the given R minor. The OS/arch
-// portion is approximate (a single generic "x86_64-pc-linux-gnu")
-// because R's own heuristic is loose here; we leave exact matching to
-// v1.x once we care about cross-distro binaries.
-func formatBinaryPackages(rows []indexRow, rMinor string) []byte {
-	sort.Slice(rows, func(a, b int) bool {
-		if rows[a].Name != rows[b].Name {
-			return rows[a].Name < rows[b].Name
-		}
-		return rows[a].Version < rows[b].Version
-	})
-
-	var buf bytes.Buffer
-	for i, r := range rows {
-		if i > 0 {
-			buf.WriteByte('\n')
-		}
-		fmt.Fprintf(&buf, "Package: %s\n", r.Name)
-		fmt.Fprintf(&buf, "Version: %s\n", r.Version)
-		fmt.Fprintf(&buf, "Built: R %s.0; x86_64-pc-linux-gnu; 2026-01-01 00:00:00; unix\n", rMinor)
-		if r.Yanked {
-			buf.WriteString("Yanked: yes\n")
+		if cell != nil && r.HasBinary {
+			built := r.Built
+			if built == "" {
+				// Binary uploaded without a readable DESCRIPTION: say
+				// what we know — the R minor it was published for.
+				built = fmt.Sprintf("R %s.0; %s; ; unix", cell.RMinor, archTriples[arch])
+			}
+			fmt.Fprintf(&buf, "Built: %s\n", built)
 		}
 	}
 	return buf.Bytes()

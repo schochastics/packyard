@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 	"gitea.cynkra.com/david.schoch/packyard/internal/db"
 )
 
@@ -77,34 +78,49 @@ func TestGetSourceEmptyChannel(t *testing.T) {
 	}
 }
 
-func TestGetSourceStanzasIncludeYanked(t *testing.T) {
+func TestGetSourceListsLatestNonYankedOnly(t *testing.T) {
 	t.Parallel()
 
 	database := setupIndexDB(t)
+	// alpha: 1.10.0 must beat 1.9.0 (numeric, not lexical ordering).
+	seedPackage(t, database, "dev", "alpha", "1.9.0", false)
+	seedPackage(t, database, "dev", "alpha", "1.10.0", false)
+	// beta: newest version yanked → the next-highest is listed.
 	seedPackage(t, database, "dev", "beta", "2.0.0", true)
-	seedPackage(t, database, "dev", "alpha", "1.0.0", false)
-	seedPackage(t, database, "dev", "alpha", "1.1.0", false)
+	seedPackage(t, database, "dev", "beta", "1.0.0", false)
+	// gamma: every version yanked → drops out of the index.
+	seedPackage(t, database, "dev", "gamma", "1.0.0", true)
 
 	idx := NewIndex(database.DB)
 	body, _, err := idx.GetSource(context.Background(), "dev", nil, nil)
 	if err != nil {
 		t.Fatalf("GetSource: %v", err)
 	}
-	s := string(body)
+	want := "Package: alpha\nVersion: 1.10.0\n\nPackage: beta\nVersion: 1.0.0\n"
+	if string(body) != want {
+		t.Errorf("PACKAGES =\n%s\nwant\n%s", body, want)
+	}
+}
 
-	// Three stanzas, sorted alpha by name.
-	if !strings.Contains(s, "Package: alpha\nVersion: 1.0.0\n") {
-		t.Errorf("alpha 1.0.0 stanza missing: %q", s)
+func TestGetSourceIncludesDescriptionFields(t *testing.T) {
+	t.Parallel()
+
+	database := setupIndexDB(t)
+	id := seedPackage(t, database, "dev", "fsapi", "1.2.0", false)
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE packages SET index_fields = ? WHERE id = ?`,
+		`{"Depends":"R (>= 4.1.0)","Imports":"fsdb (>= 2.1.16), fsutils","License":"MIT"}`, id); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(s, "Package: alpha\nVersion: 1.1.0\n") {
-		t.Errorf("alpha 1.1.0 stanza missing: %q", s)
+
+	idx := NewIndex(database.DB)
+	body, _, err := idx.GetSource(context.Background(), "dev", nil, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(s, "Package: beta\nVersion: 2.0.0\nYanked: yes\n") {
-		t.Errorf("beta yanked stanza missing or malformed: %q", s)
-	}
-	// alpha stanzas come before beta
-	if strings.Index(s, "Package: alpha") >= strings.Index(s, "Package: beta") {
-		t.Error("stanzas not sorted by name")
+	want := "Package: fsapi\nVersion: 1.2.0\nDepends: R (>= 4.1.0)\nImports: fsdb (>= 2.1.16), fsutils\nLicense: MIT\n"
+	if string(body) != want {
+		t.Errorf("PACKAGES =\n%s\nwant\n%s", body, want)
 	}
 }
 
@@ -187,27 +203,77 @@ func TestTTLExpiry(t *testing.T) {
 	}
 }
 
-func TestGetBinaryOnlyRowsWithBinariesForCell(t *testing.T) {
+func TestGetLinuxMixesBinaryAndSourceEntries(t *testing.T) {
 	t.Parallel()
 
 	database := setupIndexDB(t)
 	alphaID := seedPackage(t, database, "dev", "alpha", "1.0.0", false)
 	seedPackage(t, database, "dev", "beta", "1.0.0", false) // source-only
 	seedBinary(t, database, alphaID, "r-4.4")
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE binaries SET built = 'R 4.4.3; ; 2026-09-01 10:00:00 UTC; unix' WHERE package_id = ?`, alphaID); err != nil {
+		t.Fatal(err)
+	}
+	gammaID := seedPackage(t, database, "dev", "gamma", "1.0.0", false)
+	seedBinary(t, database, gammaID, "r-4.4") // built unknown → synthesized
 
 	idx := NewIndex(database.DB)
-	body, _, err := idx.GetBinary(context.Background(), "dev", "r-4.4", "4.4", nil, nil)
+	cell := &config.Cell{Name: "r-4.4", RMinor: "4.4"}
+	body, _, err := idx.GetLinux(context.Background(), "dev", cell, "amd64", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(body)
-	if !strings.Contains(s, "Package: alpha") {
-		t.Errorf("alpha (which has a binary for this cell) missing: %q", s)
+	want := "Package: alpha\nVersion: 1.0.0\nBuilt: R 4.4.3; ; 2026-09-01 10:00:00 UTC; unix\n\n" +
+		"Package: beta\nVersion: 1.0.0\n\n" +
+		"Package: gamma\nVersion: 1.0.0\nBuilt: R 4.4.0; x86_64-pc-linux-gnu; ; unix\n"
+	if string(body) != want {
+		t.Errorf("linux PACKAGES =\n%s\nwant\n%s", body, want)
 	}
-	if strings.Contains(s, "Package: beta") {
-		t.Errorf("beta (no binary for this cell) should not appear: %q", s)
+
+	// No cell for the client's R version: everything is a source entry.
+	src, _, err := idx.GetLinux(context.Background(), "dev", nil, "amd64", nil, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(s, "Built: R 4.4.0;") {
-		t.Errorf("Built field missing or malformed: %q", s)
+	if strings.Contains(string(src), "Built:") {
+		t.Errorf("source view carries Built: %q", src)
+	}
+}
+
+func TestGetLinuxBinaryOfOlderVersionIgnored(t *testing.T) {
+	t.Parallel()
+
+	// The latest version decides; a binary that exists only for an
+	// older version must not be advertised for the latest.
+	database := setupIndexDB(t)
+	oldID := seedPackage(t, database, "dev", "alpha", "1.0.0", false)
+	seedBinary(t, database, oldID, "r-4.4")
+	seedPackage(t, database, "dev", "alpha", "1.1.0", false)
+
+	idx := NewIndex(database.DB)
+	body, _, err := idx.GetLinux(context.Background(), "dev", &config.Cell{Name: "r-4.4", RMinor: "4.4"}, "amd64", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "Package: alpha\nVersion: 1.1.0\n"; string(body) != want {
+		t.Errorf("linux PACKAGES = %q, want %q", body, want)
+	}
+}
+
+func TestInvalidateChannelDropsLinuxViews(t *testing.T) {
+	t.Parallel()
+
+	database := setupIndexDB(t)
+	seedPackage(t, database, "dev", "alpha", "1.0.0", false)
+	idx := NewIndex(database.DB)
+	cell := &config.Cell{Name: "r-4.4", RMinor: "4.4"}
+	if _, _, err := idx.GetLinux(context.Background(), "dev", cell, "amd64", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	seedPackage(t, database, "dev", "beta", "1.0.0", false)
+	idx.InvalidateChannel("dev")
+	body, _, _ := idx.GetLinux(context.Background(), "dev", cell, "amd64", nil, nil)
+	if !strings.Contains(string(body), "Package: beta") {
+		t.Errorf("linux view not invalidated: %q", body)
 	}
 }

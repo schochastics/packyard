@@ -14,6 +14,7 @@ import (
 	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
 	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 	"gitea.cynkra.com/david.schoch/packyard/internal/importers"
+	"gitea.cynkra.com/david.schoch/packyard/internal/store"
 )
 
 // adminMain is the entry point for `packyard-server admin …`. Kept out
@@ -97,7 +98,13 @@ func adminReindex(cfg *config.ServerConfig, args []string) error {
 		return err
 	}
 
+	bf, err := store.New(deps.DB.DB, deps.CAS).BackfillMetadata(context.Background())
+	if err != nil {
+		return err
+	}
+
 	fmt.Println("packyard computes PACKAGES on demand; there is no on-disk index to rebuild.")
+	fmt.Printf("backfilled DESCRIPTION metadata: packages=%d binaries=%d\n", bf.Packages, bf.Binaries)
 	fmt.Printf("verified DB -> CAS references. missing blobs: %d\n", len(missing))
 	if len(missing) > 0 {
 		tw := newTabWriter()
