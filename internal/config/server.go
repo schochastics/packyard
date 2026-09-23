@@ -34,11 +34,6 @@ type ServerConfig struct {
 	// back to plain HTTP when either is empty.
 	TLSCert string `yaml:"tls_cert"`
 	TLSKey  string `yaml:"tls_key"`
-
-	// AllowAnonymousReads lets unauthenticated clients hit the default
-	// channel's CRAN-protocol read endpoints. Everything else still
-	// requires a valid token. Default false.
-	AllowAnonymousReads bool `yaml:"allow_anonymous_reads"`
 }
 
 // DefaultServerConfig returns a ServerConfig with defaults applied for

@@ -385,33 +385,21 @@ func channelExists(ctx context.Context, db *sql.DB, channel string) (bool, error
 	return true, nil
 }
 
-// requireReadScope is requireScope plus the anonymous-default-channel
-// exception. Flow:
-//
-//  1. Authenticated caller with read:<channel> wins immediately.
-//  2. If cfg.AllowAnonymousReads AND the channel is the DB-marked
-//     default, an unauthenticated request passes.
-//  3. Otherwise fall back to requireScope which writes the standard
-//     401/403 envelope.
+// requireReadScope is requireScope plus the per-channel anonymous
+// read exception: a request passes when it holds read:<channel>, or
+// when channels.yaml sets anonymous_reads on the channel. Otherwise
+// requireScope writes the standard 401/403 envelope.
 func requireReadScope(w http.ResponseWriter, r *http.Request, deps Deps, channel string) bool {
 	id, authenticated := IdentityFromContext(r.Context())
 	if authenticated && id.Scopes.Has("read:"+channel) {
 		return true
 	}
-	if deps.Server != nil && deps.Server.AllowAnonymousReads && isDefaultChannel(r.Context(), deps.DB.DB, channel) {
-		return true
+	if deps.Channels != nil {
+		if ch := deps.Channels.Lookup(channel); ch != nil && ch.AnonymousReads {
+			return true
+		}
 	}
 	return requireScope(w, r, "read:"+channel)
-}
-
-// isDefaultChannel is a tiny DB lookup. Call sites are rare enough
-// (one per read, and only on the anonymous path) that caching isn't
-// worth the bookkeeping yet.
-func isDefaultChannel(ctx context.Context, db *sql.DB, channel string) bool {
-	var isDefault int
-	err := db.QueryRowContext(ctx,
-		`SELECT is_default FROM channels WHERE name = ?`, channel).Scan(&isDefault)
-	return err == nil && isDefault == 1
 }
 
 // gzipBytes is a one-shot compressor. The inputs are small (a few KB

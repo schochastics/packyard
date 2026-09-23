@@ -168,27 +168,39 @@ func TestSourcePACKAGESRequiresReadScope(t *testing.T) {
 	}
 }
 
-func TestSourcePACKAGESAnonymousWhenAllowed(t *testing.T) {
+func TestAnonymousReadsPerChannel(t *testing.T) {
 	t.Parallel()
 
 	fx := newPublishFixture(t)
-	// Enable the anonymous-default-channel escape.
-	fx.deps.Server = &config.ServerConfig{AllowAnonymousReads: true}
+	fx.deps.Channels = &config.ChannelsConfig{Channels: []config.Channel{
+		{Name: "dev", OverwritePolicy: config.PolicyMutable, Kind: config.KindLocal},
+		{Name: "prod", OverwritePolicy: config.PolicyImmutable, Kind: config.KindLocal, Default: true, AnonymousReads: true},
+	}}
 	fx.mux = NewMux(fx.deps)
-
-	// prod is the default channel in the fixture.
-	publishSource(t, fx, "prod", "alpha", "1.0.0", []byte("x"))
-
-	// Anonymous request to prod succeeds.
-	rec := getURL(t, fx, "/prod/src/contrib/PACKAGES", "")
-	if rec.Code != http.StatusOK {
-		t.Errorf("anon on default channel: status = %d body %s", rec.Code, rec.Body.String())
+	for _, ch := range []string{"dev", "prod"} {
+		publishSource(t, fx, ch, "alpha", "1.0.0", []byte("x "+ch))
 	}
 
-	// Anonymous request to dev (non-default) still rejected.
-	rec = getURL(t, fx, "/dev/src/contrib/PACKAGES", "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("anon on dev: status = %d, want 401", rec.Code)
+	for _, c := range []struct {
+		path string
+		want int
+	}{
+		{"/prod/src/contrib/PACKAGES", http.StatusOK},
+		{"/prod/src/contrib/alpha_1.0.0.tar.gz", http.StatusOK},
+		{"/src/contrib/PACKAGES", http.StatusOK}, // default alias → prod
+		{"/prod/__linux__/jammy/latest/src/contrib/PACKAGES", http.StatusOK},
+		{"/dev/src/contrib/PACKAGES", http.StatusUnauthorized},
+		{"/dev/src/contrib/alpha_1.0.0.tar.gz", http.StatusUnauthorized},
+		{"/dev/__linux__/jammy/latest/src/contrib/PACKAGES", http.StatusUnauthorized},
+	} {
+		if rec := getURL(t, fx, c.path, ""); rec.Code != c.want {
+			t.Errorf("anon %s: status = %d, want %d", c.path, rec.Code, c.want)
+		}
+	}
+
+	// Anonymous reads cover the CRAN-protocol surface only.
+	if rec := getURL(t, fx, "/api/v1/packages", ""); rec.Code != http.StatusUnauthorized {
+		t.Errorf("anon JSON API: status = %d, want 401", rec.Code)
 	}
 }
 

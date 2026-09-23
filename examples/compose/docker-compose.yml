@@ -16,10 +16,8 @@ services:
     command:
       - "-data"
       - "/data"
-      # Opens the default channel to unauthenticated CRAN-protocol reads
-      # so R's install.packages() works out of the box. Remove for
-      # production — see README.md §Production hardening.
-      - "-allow-anonymous-reads"
+    # Anonymous CRAN-protocol reads are set per channel in
+    # /data/channels.yaml (`anonymous_reads: true`); see README.md.
     ports:
       - "8080:8080"
     volumes:

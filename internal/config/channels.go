@@ -53,11 +53,15 @@ const (
 
 // Channel is one entry in channels.yaml.
 type Channel struct {
-	Name            string          `yaml:"name"`
-	OverwritePolicy string          `yaml:"overwrite_policy"`
-	Default         bool            `yaml:"default"`
-	Kind            string          `yaml:"kind"`
-	Upstream        *UpstreamConfig `yaml:"upstream"`
+	Name            string `yaml:"name"`
+	OverwritePolicy string `yaml:"overwrite_policy"`
+	Default         bool   `yaml:"default"`
+	// AnonymousReads opens the channel's CRAN-protocol reads to
+	// clients without a token. Typical for repositories reachable only
+	// from an internal network. Not allowed on proxy channels.
+	AnonymousReads bool            `yaml:"anonymous_reads"`
+	Kind           string          `yaml:"kind"`
+	Upstream       *UpstreamConfig `yaml:"upstream"`
 }
 
 // UpstreamConfig holds the fields a proxy channel needs to fetch
@@ -229,12 +233,16 @@ func validateChannelKind(ch *Channel, where string) error {
 			return fmt.Errorf("%s: upstream is only valid on proxy channels (kind: proxy)", where)
 		}
 	case KindProxy:
-		// default+proxy+anonymous-reads = an open cache-fill relay for
-		// the public internet. Forbid the combination at config-load
-		// time so it's impossible to deploy by accident, regardless of
-		// the AllowAnonymousReads flag in server config.
+		// proxy+anonymous-reads = an open cache-fill relay: anyone who
+		// can reach the server could make it download arbitrary
+		// upstream packages. Forbid it at config-load time. The default
+		// channel stays local-only for the same reason: it is the one
+		// clients reach without naming a channel.
+		if ch.AnonymousReads {
+			return fmt.Errorf("%s: anonymous_reads is not allowed on proxy channels (open-relay risk)", where)
+		}
 		if ch.Default {
-			return fmt.Errorf("%s: default channel cannot be a proxy (open-relay risk if anon reads are enabled)", where)
+			return fmt.Errorf("%s: default channel cannot be a proxy", where)
 		}
 		if ch.Upstream == nil {
 			return fmt.Errorf("%s: kind: proxy requires upstream.source_url", where)

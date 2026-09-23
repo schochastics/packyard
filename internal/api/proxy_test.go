@@ -87,7 +87,7 @@ func newProxyFixture(t *testing.T) *proxyFixture {
 		CAS:      casStore,
 		Matrix:   matrix,
 		Channels: channels,
-		Server:   &config.ServerConfig{AllowAnonymousReads: false},
+		Server:   &config.ServerConfig{},
 		Index:    NewIndex(database.DB),
 		Store:    svc,
 		Upstream: upstream.New(upSrv.Client(), svc),

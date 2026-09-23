@@ -317,6 +317,22 @@ channels:
 			wantMsg: "default channel cannot be a proxy",
 		},
 		{
+			name: "proxy channel with anonymous reads",
+			yaml: `
+channels:
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+  - name: cran
+    overwrite_policy: immutable
+    anonymous_reads: true
+    kind: proxy
+    upstream:
+      source_url: https://cloud.r-project.org
+`,
+			wantMsg: "anonymous_reads is not allowed on proxy channels",
+		},
+		{
 			name: "negative index_ttl",
 			yaml: `
 channels:
@@ -375,5 +391,26 @@ func TestLoadChannelsMissingFile(t *testing.T) {
 	t.Parallel()
 	if _, err := config.LoadChannels(filepath.Join(t.TempDir(), "nope.yaml")); err == nil {
 		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestDecodeChannelsAnonymousReads(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := config.DecodeChannels(strings.NewReader(`
+channels:
+  - name: dev
+    overwrite_policy: mutable
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+    anonymous_reads: true
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Lookup("dev").AnonymousReads || !cfg.Lookup("prod").AnonymousReads {
+		t.Errorf("anonymous_reads not decoded: dev=%v prod=%v",
+			cfg.Lookup("dev").AnonymousReads, cfg.Lookup("prod").AnonymousReads)
 	}
 }
