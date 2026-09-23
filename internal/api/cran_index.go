@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/rds"
 	"gitea.cynkra.com/david.schoch/packyard/internal/rpkg"
 	"gitea.cynkra.com/david.schoch/packyard/internal/rversion"
 	"gitea.cynkra.com/david.schoch/packyard/internal/upstream"
@@ -348,4 +349,91 @@ func formatPackages(rows []indexRow, cell *config.Cell, arch string) []byte {
 		}
 	}
 	return buf.Bytes()
+}
+
+func archiveKey(channel string) string { return channelKeyPrefix(channel) + "archive" }
+
+// GetArchive returns the gzipped Meta/archive.rds for a local channel:
+// every stored version not listed in PACKAGES (older and yanked ones),
+// in CRAN's file.info() layout.
+func (i *Index) GetArchive(ctx context.Context, channel string) ([]byte, error) {
+	key := archiveKey(channel)
+	if body, ok := i.lookup(key); ok {
+		return body, nil
+	}
+	body, err := i.buildArchive(ctx, channel)
+	if err != nil {
+		return nil, err
+	}
+	i.storeWithTTL(key, body, i.ttl)
+	return body, nil
+}
+
+func (i *Index) buildArchive(ctx context.Context, channel string) ([]byte, error) {
+	latest, err := i.latestRows(ctx, channel, "")
+	if err != nil {
+		return nil, err
+	}
+	current := make(map[string]string, len(latest))
+	for _, r := range latest {
+		current[r.Name] = r.Version
+	}
+
+	rows, err := i.db.QueryContext(ctx, `
+		SELECT name, version, source_size, published_at
+		FROM packages WHERE channel = ?
+	`, channel)
+	if err != nil {
+		return nil, fmt.Errorf("archive: query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	type archived struct {
+		version string
+		file    rds.ArchiveFile
+	}
+	byName := map[string][]archived{}
+	for rows.Next() {
+		var (
+			name, version, published string
+			size                     int64
+		)
+		if err := rows.Scan(&name, &version, &size, &published); err != nil {
+			return nil, fmt.Errorf("archive: scan: %w", err)
+		}
+		if current[name] == version {
+			continue
+		}
+		at, _ := time.Parse(time.RFC3339Nano, published)
+		byName[name] = append(byName[name], archived{version, rds.ArchiveFile{
+			Path: name + "/" + name + "_" + version + ".tar.gz",
+			Size: size,
+			Time: at,
+		}})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("archive: iterate: %w", err)
+	}
+
+	names := make([]string, 0, len(byName))
+	for n := range byName {
+		names = append(names, n)
+	}
+	sort.Strings(names) // byte order == R's C-locale order
+	pkgs := make([]rds.ArchivePackage, len(names))
+	for k, n := range names {
+		vs := byName[n]
+		sort.Slice(vs, func(a, b int) bool { return rversion.Compare(vs[a].version, vs[b].version) < 0 })
+		files := make([]rds.ArchiveFile, len(vs))
+		for j, v := range vs {
+			files[j] = v.file
+		}
+		pkgs[k] = rds.ArchivePackage{Name: n, Files: files}
+	}
+
+	var buf bytes.Buffer
+	if err := rds.WriteGzip(&buf, rds.Archive(pkgs)); err != nil {
+		return nil, fmt.Errorf("archive: serialize: %w", err)
+	}
+	return buf.Bytes(), nil
 }

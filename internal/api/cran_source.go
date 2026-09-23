@@ -29,6 +29,7 @@ var errNoUpstreamFetcher = errors.New("no upstream fetcher configured on Deps")
 //	GET /{channel}/src/contrib/PACKAGES[.gz]
 //	GET /{channel}/src/contrib/{file}
 //	GET /{channel}/src/contrib/Archive/{pkg}/{file}
+//	GET /{channel}/src/contrib/Meta/archive.rds
 
 func handleSourcePackages(deps Deps, gzipped bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +51,40 @@ func handleSourceArchiveTarball(deps Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		withChannel(w, r, deps, func(channel string) {
 			serveSourceTarball(w, r, deps, channel, r.PathValue("pkg"), r.PathValue("file"))
+		})
+	}
+}
+
+// handleArchiveRDS serves src/contrib/Meta/archive.rds on both the
+// source and the /__linux__/ paths; the listing is the same for both.
+func handleArchiveRDS(deps Deps, linux bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		withChannel(w, r, deps, func(channel string) {
+			if linux {
+				if _, ok := resolveLinuxCell(w, r, deps); !ok {
+					return
+				}
+			}
+			if !requireReadScope(w, r, deps, channel) {
+				return
+			}
+			if herr := requireChannel(r.Context(), deps, channel); herr != nil {
+				herr.write(w, r)
+				return
+			}
+			if lookupChannelMeta(r.Context(), deps, channel).IsProxy() {
+				writeError(w, r, http.StatusNotFound, CodeNotFound,
+					"archive.rds is not served for proxy channels", "")
+				return
+			}
+			body, err := deps.Index.GetArchive(r.Context(), channel)
+			if err != nil {
+				internalErr("build archive.rds", err).write(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			_, _ = w.Write(body)
 		})
 	}
 }

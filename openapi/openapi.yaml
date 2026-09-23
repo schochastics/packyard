@@ -991,6 +991,30 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /{channel}/src/contrib/Meta/archive.rds:
+    get:
+      summary: Archive listing (archive.rds)
+      description: |
+        gzip-compressed R serialization of a named list of data frames in
+        file.info() shape, one per package with archived versions — the
+        format of CRAN's src/contrib/Meta/archive.rds. Lists every stored
+        version not in PACKAGES, yanked ones included.
+      operationId: getSourceArchiveRds
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+      responses:
+        '200':
+          description: R-serialized archive listing.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /{channel}/__linux__/{distro}/{snapshot}/src/contrib/PACKAGES:
     get:
       summary: Linux PACKAGES index
@@ -1146,6 +1170,44 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /{channel}/__linux__/{distro}/{snapshot}/src/contrib/Meta/archive.rds:
+    get:
+      summary: Archive listing (archive.rds)
+      description: |
+        gzip-compressed R serialization of a named list of data frames in
+        file.info() shape, one per package with archived versions — the
+        format of CRAN's src/contrib/Meta/archive.rds. Lists every stored
+        version not in PACKAGES, yanked ones included.
+      operationId: getLinuxArchiveRds
+      tags: [cran]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - name: distro
+          in: path
+          required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
+          schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
+      responses:
+        '200':
+          description: R-serialized archive listing.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /src/contrib/PACKAGES:
     get:
       summary: Source PACKAGES index (default channel)
@@ -1227,6 +1289,28 @@ paths:
           description: Tarball bytes.
           content:
             application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /src/contrib/Meta/archive.rds:
+    get:
+      summary: Archive listing (archive.rds) (default channel)
+      description: |
+        gzip-compressed R serialization of a named list of data frames in
+        file.info() shape, one per package with archived versions — the
+        format of CRAN's src/contrib/Meta/archive.rds. Lists every stored
+        version not in PACKAGES, yanked ones included.
+      operationId: getDefaultSourceArchiveRds
+      tags: [cran]
+      responses:
+        '200':
+          description: R-serialized archive listing.
+          content:
+            application/octet-stream:
               schema:
                 type: string
                 format: binary
@@ -1378,6 +1462,43 @@ paths:
               description: '`User-Agent` — the response depends on the client R version.'
           content:
             application/x-gzip:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /__linux__/{distro}/{snapshot}/src/contrib/Meta/archive.rds:
+    get:
+      summary: Archive listing (archive.rds) (default channel)
+      description: |
+        gzip-compressed R serialization of a named list of data frames in
+        file.info() shape, one per package with archived versions — the
+        format of CRAN's src/contrib/Meta/archive.rds. Lists every stored
+        version not in PACKAGES, yanked ones included.
+      operationId: getDefaultLinuxArchiveRds
+      tags: [cran]
+      parameters:
+        - name: distro
+          in: path
+          required: true
+          description: Must equal matrix.yaml's distro; anything else is 404.
+          schema: { type: string }
+        - name: snapshot
+          in: path
+          required: true
+          description: Only `latest` is supported.
+          schema: { type: string, enum: [latest] }
+      responses:
+        '200':
+          description: R-serialized archive listing.
+          headers:
+            Vary:
+              schema: { type: string }
+              description: '`User-Agent` — the response depends on the client R version.'
+          content:
+            application/octet-stream:
               schema:
                 type: string
                 format: binary

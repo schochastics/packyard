@@ -102,12 +102,14 @@ func NewMux(deps Deps) http.Handler {
 		mux.HandleFunc("GET "+src+"/PACKAGES.gz", handleSourcePackages(deps, true))
 		mux.HandleFunc("GET "+src+"/{file}", handleSourceTarball(deps))
 		mux.HandleFunc("GET "+src+"/Archive/{pkg}/{file}", handleSourceArchiveTarball(deps))
+		mux.HandleFunc("GET "+src+"/Meta/archive.rds", handleArchiveRDS(deps, false))
 
 		linux := prefix + "/__linux__/{distro}/{snapshot}/src/contrib"
 		mux.HandleFunc("GET "+linux+"/PACKAGES", handleLinuxPackages(deps, false))
 		mux.HandleFunc("GET "+linux+"/PACKAGES.gz", handleLinuxPackages(deps, true))
 		mux.HandleFunc("GET "+linux+"/{file}", handleLinuxTarball(deps))
 		mux.HandleFunc("GET "+linux+"/Archive/{pkg}/{file}", handleLinuxArchiveTarball(deps))
+		mux.HandleFunc("GET "+linux+"/Meta/archive.rds", handleArchiveRDS(deps, true))
 	}
 
 	// Operator dashboard. Mounted under /ui/ so an operator can point a
