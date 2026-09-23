@@ -16,14 +16,19 @@ docker compose up -d
 - Data persisted in the named volume `compose_packyard-data` (SQLite
   catalog + content-addressed blob store + bootstrapped
   `channels.yaml` / `matrix.yaml`).
-- Default channels `dev`, `test`, `prod` with `prod` as default.
-- **Anonymous CRAN-protocol reads enabled on the default channel**
-  via the `-allow-anonymous-reads` flag in the compose file. Every
-  non-read endpoint (publish, yank, delete, admin) still requires a
-  token.
+- Channels `dev`, `test`, `prod` from [channels.yaml](channels.yaml),
+  mounted read-only, with `prod` as default.
+- **Anonymous CRAN-protocol reads on `prod`**
+  (`anonymous_reads: true` in `channels.yaml`). Every other endpoint
+  (publish, yank, delete, admin, the JSON API) still requires a token,
+  and so do reads of `dev` and `test`.
 - `unless-stopped` restart policy.
-- Healthcheck shells out to `packyard-server -version` (distroless
-  ships no `curl` / `wget`).
+- Healthcheck runs `packyard-server -healthcheck` (distroless ships no
+  `curl` / `wget`).
+
+For a production-shaped deployment (read-only config, tokens from
+secret files, a separate metrics port, backups) see
+[production/](production/).
 
 ## First-run: mint an admin token
 
@@ -61,9 +66,9 @@ install.packages(
 )
 ```
 
-This works out of the box because `-allow-anonymous-reads` is on in
-the compose file. When you turn it off (next section), R clients need
-to supply a bearer token — see the recipe below.
+This works out of the box because `prod` sets `anonymous_reads: true`.
+When you turn it off (next section), R clients need to supply a bearer
+token; see the recipe below.
 
 ## Daily ops
 
@@ -103,10 +108,10 @@ behind nginx) rely on network-layer controls rather than
 CRAN-protocol auth. Pick the shape that matches your deployment:
 
 - **Trusted network** (VPN / internal subnet / corporate SSO proxy
-  in front): leave `-allow-anonymous-reads` on. Network decides who
+  in front): leave `anonymous_reads: true` on. Network decides who
   can talk to packyard. This is the more common private-registry
   pattern and is what the compose file ships with.
-- **Internet-exposed**: drop `-allow-anonymous-reads`, issue
+- **Internet-exposed**: remove `anonymous_reads`, issue
   per-client `read:<channel>` tokens, and wire them into R via the
   recipe in §2. Only necessary when you can't put the server on a
   trusted network.
@@ -114,53 +119,32 @@ CRAN-protocol auth. Pick the shape that matches your deployment:
 Everything below applies in both modes except §1 and §2, which only
 matter for the internet-exposed shape.
 
-### 1. Drop `-allow-anonymous-reads`
+### 1. Turn off anonymous reads
 
-Edit `docker-compose.yml` and remove the flag from `command:` so the
-server rejects unauthenticated reads with `401`. Or set it off in a
-mounted `server.yaml`:
-
-```yaml
-# server.yaml
-listen: ":8080"
-data_dir: "/data"
-allow_anonymous_reads: false
-```
-
-…and point the container at it:
-
-```yaml
-# docker-compose.yml fragment
-    command: ["-config", "/config/server.yaml"]
-    volumes:
-      - packyard-data:/data
-      - ./server.yaml:/config/server.yaml:ro
-```
+Remove `anonymous_reads: true` from `prod` in
+[channels.yaml](channels.yaml) and `docker compose restart packyard`.
+The server then rejects unauthenticated reads with `401`.
 
 ### 2. Issue `read:<channel>` tokens for R clients
 
 Once anonymous reads are off, R needs to send `Authorization: Bearer`
 on every request. Base R's `install.packages()` doesn't take
-per-repo headers directly, so wire it through `download.file.method`
-or `pak`:
+per-repo headers directly. One way is the external `curl` download
+method, whose extra arguments R passes through:
 
 ```r
 # options-level — before any install.packages() call.
 token <- Sys.getenv("PACKYARD_TOKEN")
 options(
   repos = c(packyard = "https://packyard.corp/", getOption("repos")),
-  download.file.method = "libcurl",
+  download.file.method = "curl",
   download.file.extra = paste0("--header 'Authorization: Bearer ", token, "'")
 )
 install.packages("<your-package>")
 ```
 
-`pak` users can instead do:
-
-```r
-pak::repo_add(packyard = "https://packyard.corp/")
-# pak picks up the header via the same download.file.extra option.
-```
+This sends the header to every repository in `repos`, CRAN included.
+Keep it to trusted mirrors.
 
 ### 3. Terminate TLS in front
 
@@ -207,7 +191,8 @@ you with an unintended upgrade.
 
 ### 5. Back up the volume
 
-The named volume holds the entire catalog. Follow the cadence table
-in [../../docs/backup-restore.md](../../docs/backup-restore.md) — at
-minimum: nightly `.backup` of `db.sqlite`, nightly `rsync` of
-`cas/`, on a host distinct from the live disk.
+The named volume holds the entire catalog. Run
+`packyard-server admin backup -out` on a schedule, into storage on a
+different host or disk, and verify it with `admin backup -verify`. See
+[../../docs/backup-restore.md](../../docs/backup-restore.md) and the
+`backup` service in [production/](production/).

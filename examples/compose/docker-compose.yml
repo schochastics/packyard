@@ -16,12 +16,12 @@ services:
     command:
       - "-data"
       - "/data"
-    # Anonymous CRAN-protocol reads are set per channel in
-    # /data/channels.yaml (`anonymous_reads: true`); see README.md.
     ports:
       - "8080:8080"
     volumes:
       - packyard-data:/data
+      # prod allows anonymous CRAN-protocol reads; see channels.yaml.
+      - ./channels.yaml:/data/channels.yaml:ro
     restart: unless-stopped
     healthcheck:
       # Distroless has no curl/wget; the binary probes its own /health.

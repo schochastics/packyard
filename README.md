@@ -12,6 +12,27 @@ CRAN-protocol-compatible read surface, so existing R tooling
 (`install.packages`, [renv](https://rstudio.github.io/renv/),
 [pak](https://pak.r-lib.org/)) works out of the box.
 
+**Scope:** packyard hosts internal packages only. Public packages keep
+coming from PPM or CRAN. Each deployment serves one Linux distribution
+and every R minor its clients run.
+
+## Using it from R
+
+```r
+options(repos = c(
+  internal = "https://packages.example.org/prod/__linux__/jammy/latest",
+  CRAN     = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"
+))
+install.packages("mypkg")
+```
+
+This uses the same URL shape as Posit Package Manager. Packyard reads
+the R version from the request's User-Agent and serves the binary CI
+built for that version, or the source tarball when there is none.
+Archived versions are served from `Archive/` and listed in
+`Meta/archive.rds`, so `remotes::install_version()` and
+`renv::restore()` of pinned versions work.
+
 ## Quickstart
 
 ```sh
@@ -27,12 +48,16 @@ minutes including the Docker pull.
 
 - **One Go binary.** No Postgres, no Redis, no object store.
 - **SQLite + local filesystem** by default. `scp` the binary and run.
-- **CRAN-protocol read endpoints** so any R client works unmodified.
+- **CRAN-protocol read endpoints** so any R client works unmodified:
+  a latest-only `PACKAGES` with dependency fields, `Archive/` and
+  `Meta/archive.rds` for older versions, and PPM-style
+  `__linux__/<distro>/latest` binaries per R version.
 - **Channels** (`dev`, `test`, `prod`, or any names you configure) with
   per-channel overwrite policy and scoped tokens.
-- **Publish via curl.** The
-  [reference CI workflow](examples/ci/publish.yml) builds per-cell
-  binaries and POSTs them multipart — no maintained action needed.
+- **Publish from any CI.** The [reference scripts](examples/ci/) build
+  the source plus one binary per configured R version, publish over
+  plain HTTP, and backfill binaries when an R version is added. They
+  are CI-vendor neutral.
 - **OpenAPI 3 spec shipped** at `/api/v1/openapi.json`.
 - **Operator dashboard** at `/ui/` with channel cards, events, cells
   coverage, and storage stats.
@@ -115,14 +140,16 @@ The binary is a single static executable; no C runtime required.
 | [api.md](docs/api.md) | HTTP API reference, curl examples, error codes. |
 | [config.md](docs/config.md) | `channels.yaml`, `matrix.yaml`, server config. |
 | [admin.md](docs/admin.md) | `packyard-server admin …` commands. |
-| [backup-restore.md](docs/backup-restore.md) | Snapshots, rsync cadence, and restore verification. |
+| [backup-restore.md](docs/backup-restore.md) | `admin backup` / `restore` / `-verify`, cadence, DR drill. |
 | [airgap.md](docs/airgap.md) | Air-gap deploy + CRAN bundle import (v1.x — bundler + importer shipped). |
 | [proxy.md](docs/proxy.md) | Lazy proxy channels — single-URL setup, snapshot pinning, per-cell binaries. |
-| [migration.md](docs/migration.md) | Moving from drat or git to packyard. |
+| [migration.md](docs/migration.md) | Moving from an S3/CRAN-like repository, drat or git to packyard. |
 | [design.md](design.md) | Architecture and scope. |
 | [implementation.md](implementation.md) | Phased build plan and status. |
 | [examples/ci/README.md](examples/ci/README.md) | Reference CI workflow. |
 | [examples/compose/README.md](examples/compose/README.md) | `docker compose up` template and production hardening. |
+| [examples/compose/production/](examples/compose/production/) | Read-only config, provisioned tokens, metrics port, backups. |
+| [tests/e2e/README.md](tests/e2e/README.md) | `make e2e`: real R clients against a live server. |
 
 The OpenAPI spec is also served at `/api/v1/openapi.json` (and
 `.yaml`) from any running packyard.
@@ -138,12 +165,9 @@ The OpenAPI spec is also served at `/api/v1/openapi.json` (and
 - Admin CLI: import (drat, git), channels/cells list, gc, reindex.
 - Prometheus metrics + structured access logs.
 - Reference CI workflow for GitHub Actions + Gitea Actions.
-- **Lazy proxy channels** (Verdaccio-style uplinks). Configure a
-  channel with `kind: proxy` + `upstream.source_url` and packyard
-  fetches public packages from upstream on demand, caches them
-  content-addressed, and serves subsequent requests locally. Per-cell
-  binary URLs let proxy channels serve precompiled tarballs too.
-  See [docs/proxy.md](docs/proxy.md).
+- **Lazy proxy channels** (Verdaccio-style uplinks), now **frozen**:
+  supported, but no new features, since public packages belong on
+  PPM/CRAN. See [docs/proxy.md](docs/proxy.md).
 
 ### v1.x
 

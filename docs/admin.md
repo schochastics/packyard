@@ -114,17 +114,21 @@ packyard-server admin -data ./data import bundle \
   ./cran-r4.4-2026q1.tar.gz -channel cran-r4.4-2026q1
 ```
 
-The target channel must already exist in `channels.yaml` with
-`overwrite_policy: immutable` — the importer does not auto-create it
-because `channels.yaml` is the source of truth for channel policy and
-an air-gap snapshot must not be silently mutable.
+The target channel must already exist in `channels.yaml`. The
+importer does not create channels, because `channels.yaml` is the
+source of truth for their policy. That policy applies to every
+imported version, as for a publish. On an **immutable** channel,
+identical bytes are skipped, and different bytes for an existing
+version fail that package. A **mutable** channel is overwritten. Put
+air-gap snapshots in immutable channels. Migrations
+([migration.md](migration.md)) may target any channel.
 
 The output line annotates the bundle's `kind` (and `cell` for binary
 bundles) so the operator can tell at a glance which run-mode it was:
 
 ```
 imported=42 skipped=0 failed=0 snapshot=cran-r4.4-2026q1 kind=source
-imported=42 skipped=0 failed=0 snapshot=cran-r4.4-2026q1 kind=binary cell=rhel9-amd64-r-4.4
+imported=42 skipped=0 failed=0 snapshot=cran-r4.4-2026q1 kind=binary cell=r-4.4
 ```
 
 What happens, in order:
@@ -174,9 +178,11 @@ uploaded bytes.
 
 ```sh
 $ packyard-server admin -data ./data cells list
-CELL                       OS                  ARCH   R    BINARIES  COVERAGE  SIZE
-ubuntu-24.04-amd64-r-4.5   linux ubuntu-24.04  amd64  4.5  40        40/42     512 MiB
-ubuntu-24.04-arm64-r-4.5   linux ubuntu-24.04  arm64  4.5  38        38/42     498 MiB
+distro jammy (amd64), default R 4.5
+
+CELL   R    BINARIES  COVERAGE  SIZE
+r-4.4  4.4  40        40/42     512 MiB
+r-4.5  4.5  38        38/42     498 MiB
 ```
 
 ### `admin cells show <cell-name>`
@@ -186,9 +192,9 @@ binary for that cell. Targets the "added a new cell, which packages
 still need to build?" workflow.
 
 ```sh
-$ packyard-server admin -data ./data cells show rhel-9-amd64-r-4.5
-cell rhel-9-amd64-r-4.5
-  os     linux rhel-9
+$ packyard-server admin -data ./data cells show r-4.5
+cell r-4.5
+  distro jammy
   arch   amd64
   r      4.5
 
@@ -255,7 +261,7 @@ Missing blobs are printed as a table:
 ```
 CHANNEL  PACKAGE  VERSION  COLUMN                          SHA256
 prod     foo      1.0.0    source                          abc…
-prod     foo      1.0.0    binary/ubuntu-24.04-amd64-r-4.5  def…
+prod     foo      1.0.0    binary/r-4.5                    def…
 ```
 
 Non-zero exit when any mismatches are found, so the command composes

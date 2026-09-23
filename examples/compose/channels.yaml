@@ -1,0 +1,15 @@
+# Channels for the compose example. Mounted read-only over
+# /data/channels.yaml; edit and `docker compose restart packyard`.
+#
+# anonymous_reads: true lets R's install.packages() read prod without a
+# token (CRAN-protocol reads only; publish, yank and the JSON API still
+# need one). Remove it for an internet-exposed server.
+channels:
+  - name: dev
+    overwrite_policy: mutable
+  - name: test
+    overwrite_policy: mutable
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+    anonymous_reads: true

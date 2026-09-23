@@ -16,8 +16,9 @@ prefix; additive changes happen in-place.
   relative to that.
 - **Auth.** `Authorization: Bearer <token>` on every non-public endpoint.
   `/health`, `/metrics`, and the OpenAPI endpoints are unauthenticated.
-  CRAN-protocol reads are anonymous by default — see
-  [config.md](config.md) for the `allow_anonymous_reads` knob.
+  CRAN-protocol reads need a `read:<channel>` token unless the channel
+  sets `anonymous_reads: true` in `channels.yaml`; see
+  [config.md](config.md).
 - **Content type.** JSON everywhere except publish (multipart) and
   CRAN-protocol reads (DCF text or `application/gzip`).
 - **Timestamps.** ISO-8601 with millisecond precision and `Z` suffix
@@ -127,11 +128,13 @@ Response:
 #### `GET /api/v1/admin/tokens`
 
 Lists tokens (no plaintext, no sha). `last_used_at` is updated on every
-authenticated request that resolves to this token.
+authenticated request that resolves to this token. `source` is `api`
+for minted tokens and `config` for tokens from `server.yaml` `tokens:`.
 
 #### `DELETE /api/v1/admin/tokens/{id}`
 
-Revokes the token. Existing `/ui/` sessions using the revoked token
+Revokes the token. Config tokens are refused with 409 `conflict`:
+remove them from `server.yaml`, and the next start revokes them. Existing `/ui/` sessions using the revoked token
 become anonymous on the very next request (packyard does not cache
 identity — every request hits the tokens table).
 
@@ -164,7 +167,9 @@ documented exception to packyard's otherwise-flat response shape.
 
 #### `GET /api/v1/cells`
 
-Dumps `matrix.yaml` as JSON. Same admin-only scope caveat applies.
+`matrix.yaml` as JSON: `distro`, `arch`, `default_r_minor` and one
+`{name, r_minor}` per cell. Any valid token can read it, because CI
+build scripts use it to learn which R versions to build for.
 
 #### `GET /api/v1/events`
 
@@ -200,8 +205,8 @@ Manifest schema (strict — unknown fields are rejected):
   "source": "source",
   "description_version": "1.0.0",
   "binaries": [
-    {"cell": "ubuntu-24.04-amd64-r-4.4", "part": "bin_r_44"},
-    {"cell": "ubuntu-24.04-amd64-r-4.5", "part": "bin_r_45"}
+    {"cell": "r-4.4", "part": "bin_r_4_4"},
+    {"cell": "r-4.5", "part": "bin_r_4_5"}
   ]
 }
 ```
@@ -222,7 +227,9 @@ curl --fail-with-body -X POST \
 Required scope: `publish:<channel>`. Response is JSON with
 `source_sha256`, `source_size`, a `binaries` array, and `created` /
 `overwritten` / `already_existed` flags so CI can tell at a glance what
-the server did.
+the server did. `missing_cells` lists the matrix cells still without a
+binary for this version. Publishing with binaries for only some cells
+is fine; attach the rest later (below).
 
 Behavior by channel policy:
 
@@ -231,6 +238,39 @@ Behavior by channel policy:
 - **immutable, different bytes** — 409 `version_immutable`.
 
 Size caps: 2 GiB total request body; 1 MiB manifest part.
+
+#### `POST /api/v1/packages/{channel}/{name}/{version}/binaries/{cell}`
+
+Attach (or replace) one cell's binary on an already-published
+version. Multipart with a single part named `binary`. CI uses it to
+retry a failed build, or to backfill a newly added R version.
+
+```sh
+curl --fail-with-body -X POST \
+  http://localhost:8080/api/v1/packages/prod/mypkg/1.0.0/binaries/r-4.6 \
+  -H "Authorization: Bearer $PUB" \
+  -F "binary=@mypkg_1.0.0_R_x86_64-pc-linux-gnu.tar.gz;type=application/gzip"
+```
+
+| Status | When |
+|---|---|
+| 201 | Binary added for a cell that had none. |
+| 200 | Identical bytes already present (`already_existed`), or replaced on a mutable channel (`overwritten`). |
+| 400 | Unknown cell, or not exactly one `binary` part. |
+| 404 | The version isn't published on the channel. |
+| 409 | `version_immutable`: different bytes for a cell that already has a binary on an immutable channel. `channel_is_proxy`: proxy channels take no uploads. |
+
+Adding a missing cell is allowed on immutable channels; only replacing
+one is not. Required scope: `publish:<channel>`.
+
+#### `GET /api/v1/channels/{channel}/missing-binaries[?cell=<cell>]`
+
+For the current version of every package (the one `PACKAGES` serves),
+the cells with no binary: `{"channel": "prod", "missing": [{name,
+version, cell}, …]}`. Archived versions are not listed. Readable with
+`publish:<channel>` or `admin`, so a backfill job needs only its
+publish token. [examples/ci/packyard-backfill.sh](../examples/ci/packyard-backfill.sh)
+is the reference consumer.
 
 ### Yank
 
@@ -247,9 +287,10 @@ curl --fail-with-body -X POST \
 Yank is reversible (a future endpoint will unyank); bytes stay in CAS.
 Required scope: `yank:<channel>`.
 
-Yanked packages still appear in `PACKAGES` but with a `Yanked: true`
-field so R clients can warn. `install.packages()` against a yanked
-version currently still installs — R has no native yank semantics.
+Yanked versions disappear from `PACKAGES`: the index then serves the
+highest non-yanked version. They are listed in `Meta/archive.rds` and
+stay downloadable under `Archive/`, so lockfiles pinning them keep
+restoring.
 
 ### Delete
 
@@ -269,39 +310,80 @@ Required scope: `admin`. On immutable channels this returns 409
 
 ### CRAN-protocol reads
 
-These endpoints exist to make packyard indistinguishable from a CRAN
-repo to standard R tooling. No bearer token required unless
-`allow_anonymous_reads` is false on the channel.
+These endpoints make packyard look like a CRAN repository to standard
+R tooling: `install.packages()`, `remotes`, `renv`, `pak`.
 
 #### Source
 
-- `GET /{channel}/src/contrib/PACKAGES` — DCF index.
-- `GET /{channel}/src/contrib/PACKAGES.gz` — gzipped DCF.
-- `GET /{channel}/src/contrib/<file>.tar.gz` — source tarball stream.
+```
+GET /{channel}/src/contrib/PACKAGES[.gz]
+GET /{channel}/src/contrib/{pkg}_{ver}.tar.gz
+GET /{channel}/src/contrib/Archive/{pkg}/{pkg}_{ver}.tar.gz
+GET /{channel}/src/contrib/Meta/archive.rds
+```
 
-#### Binary (Linux-cell-specific)
+- **`PACKAGES`** lists one entry per package: the highest non-yanked
+  version, by R's `package_version` ordering. It carries the
+  dependency fields (`Depends`, `Imports`, `LinkingTo`, `Suggests`,
+  …), so dependencies within the repository resolve.
+- **`Archive/`** and **`Meta/archive.rds`** cover every other
+  version, yanked ones included. `archive.rds` has the structure of
+  CRAN's, so `remotes::install_version()` and `renv::restore()` find
+  archived versions.
+- **Tarball downloads are lenient.** `src/contrib/{file}` and
+  `Archive/{pkg}/{file}` both serve any non-deleted version.
 
-- `GET /{channel}/bin/linux/{cell}/PACKAGES`
-- `GET /{channel}/bin/linux/{cell}/PACKAGES.gz`
-- `GET /{channel}/bin/linux/{cell}/<file>.tar.gz`
+#### Linux binaries
+
+```
+GET /{channel}/__linux__/{distro}/latest/src/contrib/…
+```
+
+The same five routes, in the URL shape Posit Package Manager uses,
+which Workbench and Connect images already expect:
+
+- **`{distro}`** must equal `matrix.yaml`'s `distro`. Any other value
+  returns 404 with a message naming the right one. Only the `latest`
+  snapshot exists.
+- **Cell resolution.** The R version is read from the `User-Agent`,
+  e.g. `R (4.4.3 x86_64-pc-linux-gnu …)`, which also covers renv and
+  pak. It picks the cell whose `r_minor` matches. Without an R
+  User-Agent, `default_r_minor` is used.
+- **Binary or source.** For each package, the index and tarball
+  routes serve that cell's binary when one exists, and the source
+  tarball otherwise. An R version with no cell gets source for
+  everything.
+- **`Vary: User-Agent`** is set on every response, so caches don't
+  serve an R 4.4 binary to R 4.6.
 
 #### Default-channel alias
 
-Everything above is also mounted at the root so
-`options(repos="http://packyard.corp/")` works unmodified:
-
-- `GET /src/contrib/PACKAGES` → default channel's source index.
-- `GET /bin/linux/{cell}/PACKAGES` → default channel's binary index.
+Every route above also exists without the `/{channel}` prefix, serving
+the default channel.
 
 R configuration:
 
 ```r
-# Point only at the default channel (simplest):
-options(repos = c(PACKYARD = "http://packyard.corp/", getOption("repos")))
+# Binaries for the R version in use, source fallback:
+options(repos = c(
+  internal = "https://packages.example.org/prod/__linux__/jammy/latest",
+  CRAN     = "https://packagemanager.posit.co/cran/__linux__/jammy/latest"
+))
 
-# Explicit channel:
-options(repos = c(PACKYARD_DEV = "http://packyard.corp/dev/", getOption("repos")))
+# Source only:
+options(repos = c(internal = "https://packages.example.org/prod", getOption("repos")))
 ```
+
+A channel without `anonymous_reads` needs `Authorization: Bearer
+<token>` on every read. That is fine for CI and scripts. For
+interactive R users on an internal network, `anonymous_reads: true`
+is the usual choice.
+
+**pak and archived versions.** `pak::pkg_install("pkg@1.0.0")` looks
+archived versions up on CRAN only, and silently installs the current
+version from any other repository. Use
+`url::https://…/src/contrib/Archive/pkg/pkg_1.0.0.tar.gz`, `renv` or
+`remotes::install_version()` instead.
 
 ## Scopes
 
@@ -313,10 +395,10 @@ Tokens carry a CSV of scopes. Format: `<verb>:<channel>` or a bare
 | `admin` | Everything, including minting and revoking tokens, and deleting packages. |
 | `publish:<channel>` | Publish to that channel. `publish:*` for any. |
 | `yank:<channel>` | Yank in that channel. `yank:*` for any. |
-| `read:<channel>` | Bearer-auth read of admin JSON endpoints filtered to that channel (v1 treats all JSON reads as admin; reserved for future loosening). |
+| `read:<channel>` | CRAN-protocol reads of that channel when it doesn't set `anonymous_reads`. `read:*` for any. |
 
-CRAN-protocol reads don't consult scopes — they consult the channel's
-`allow_anonymous_reads` flag.
+The JSON read surface (`/api/v1/channels`, `/packages`, `/events`)
+needs `admin`. `/api/v1/cells` needs any valid token.
 
 ## Idempotency and retries
 

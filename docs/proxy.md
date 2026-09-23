@@ -1,5 +1,11 @@
 # Lazy proxy channels
 
+> **Frozen.** Packyard's scope is internal packages. Public CRAN
+> packages come from Posit Package Manager or CRAN, configured next to
+> packyard in `repos =`. Proxy channels keep working and stay covered
+> by tests, but get no new features. For air-gapped sites, use
+> [bundles](airgap.md) instead.
+
 Packyard supports two kinds of channel:
 
 - **local** (the default) — packages get into the channel via CI
@@ -86,7 +92,9 @@ channel.
 ## Per-cell binaries
 
 Source tarballs work out of the box. To proxy precompiled Linux
-binaries (PPM-style), add a `binary_urls` map keyed by cell:
+binaries (PPM-style), add a `binary_urls` map keyed by cell. Clients
+reach them through the channel's `__linux__/<distro>/latest` URL, and
+the cell is picked from their User-Agent like on local channels:
 
 ```yaml
 - name: cran
@@ -95,8 +103,8 @@ binaries (PPM-style), add a `binary_urls` map keyed by cell:
   upstream:
     source_url: https://packagemanager.posit.co/cran/latest
     binary_urls:
-      ubuntu-22.04-amd64-r-4.4: https://packagemanager.posit.co/cran/__linux__/jammy/latest
-      ubuntu-24.04-amd64-r-4.5: https://packagemanager.posit.co/cran/__linux__/noble/latest
+      r-4.4: https://packagemanager.posit.co/cran/__linux__/jammy/latest
+      r-4.5: https://packagemanager.posit.co/cran/__linux__/jammy/latest
 ```
 
 The cell name on the left **must** appear in `matrix.yaml`. On
@@ -108,7 +116,7 @@ For r-universe, point at the org's binary tree:
 
 ```yaml
 binary_urls:
-  ubuntu-22.04-amd64-r-4.4: https://my-org.r-universe.dev/bin/linux/jammy/4.4
+  r-4.4: https://my-org.r-universe.dev/bin/linux/jammy/4.4
 ```
 
 ## Knobs
@@ -136,14 +144,13 @@ upstream:
 
 ## Security and operational notes
 
-- **Forbidden combinations.** `kind: proxy` + `default: true` is
-  rejected at startup — that combination would expose an open
-  cache-fill relay if anonymous reads are also enabled. Use a named
-  proxy channel and reference it explicitly from `repos =`.
-- **Scope.** Proxy fetches happen as a side effect of read. The
-  caller needs `read:<channel>` (or anonymous reads, for non-default
-  proxy channels with `allow_anonymous_reads: true`). No separate
-  `proxy:<channel>` scope today.
+- **Forbidden combinations.** `kind: proxy` with `default: true` or
+  with `anonymous_reads: true` is rejected at startup, because either
+  would expose an open cache-fill relay. Use a named proxy channel and
+  reference it explicitly from `repos =`.
+- **Scope.** Proxy fetches happen as a side effect of a read, and the
+  caller needs `read:<channel>`. There is no separate
+  `proxy:<channel>` scope.
 - **Writes are rejected.** Publish, yank, delete, and bundle import
   on a proxy channel return `409 channel_is_proxy`. Proxy channels
   mirror upstream; to override a public package, create a local

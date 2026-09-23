@@ -3,6 +3,16 @@
 **Status:** Skeleton for iteration. Decisions and deferrals are explicit.
 **See also:** [research.md](research.md) for prior art.
 
+> **Scope (September 2026).** Packyard hosts an organisation's
+> **internal** R packages. Public CRAN packages stay on Posit Package
+> Manager or CRAN, configured next to packyard in `repos =`. The
+> air-gap bundle path (§10) remains for sites that can't reach them.
+> Proxy channels (§15) are **frozen**: they keep working and their
+> tests stay green, but they get no new features. Each deployment
+> serves exactly one Linux distribution and every R minor its clients
+> run (§8). §4 and §8 describe the shipped layout; the rest of this
+> document is the original design and says so where it differs.
+
 ---
 
 ## 0. Positioning vs Posit Package Manager (PPM)
@@ -185,35 +195,42 @@ The target is a ten-minute `scp`-and-`systemctl-start` deploy on a single VM. Sc
 
 ## 4. URL layout
 
-> **Superseded.** This section describes the original design. The shipped layout differs: see [implementation-v2.md](implementation-v2.md) Phase 2 and [docs/api.md](docs/api.md).
-
-CRAN-protocol-compatible so any R client (base, renv, pak, uvr, rv) works out of the box:
+CRAN-protocol-compatible, so any R client (base, renv, pak, remotes,
+rv) works unchanged. The binary path copies Posit Package Manager's
+`__linux__` shape, which Workbench and Connect images already expect:
 
 ```
 https://packyard.corp/
-  <channel>/<R-major.minor>/src/contrib/PACKAGES      # one endpoint per channel
-  <channel>/<R-major.minor>/bin/linux/<distro>/...    # platform binaries
+  <channel>/src/contrib/PACKAGES[.gz]                      # latest non-yanked version per package
+  <channel>/src/contrib/<pkg>_<ver>.tar.gz                  # any version (lenient)
+  <channel>/src/contrib/Archive/<pkg>/<pkg>_<ver>.tar.gz    # any version
+  <channel>/src/contrib/Meta/archive.rds                    # every version not in PACKAGES
 
-  # e.g. (channel names are arbitrary — operator's choice)
-  dev/4.4/src/contrib/PACKAGES
-  prod/4.4/src/contrib/PACKAGES
+  <channel>/__linux__/<distro>/latest/src/contrib/…         # same five routes:
+                                                            # binary for the client's R minor
+                                                            # where one exists, else source
 
-  # the default channel (flagged `default: true` in channels.yaml) is also
-  # served as a URL alias at the root — so clients can omit the channel
-  # for the common case:
-  4.4/src/contrib/PACKAGES        # alias → /prod/4.4/... (see §9.3)
+  # Every route also exists without <channel> for the default channel.
 
-  api/v1/channels                                     # JSON API
-  api/v1/channels/{name}/packages
-  api/v1/publish                                      # POST new build into a channel
-  api/v1/yank                                         # mark a version unavailable
-  api/v1/events                                       # audit log (publish, yank)
-  api/v1/openapi.json                                 # OpenAPI 3 spec
+  api/v1/…                                                  # JSON API (docs/api.md)
 ```
 
-**Channels do not overlay each other on the server.** Clients decide composition — they configure an ordered list of channel URLs in `repos =` (packyard alongside upstream CRAN / PPM), exactly like standard R against multiple CRAN mirrors. This keeps the server dumb and moves "which sources this project uses" into the project config, where it belongs.
+- **`<distro>`** is `matrix.yaml`'s single `distro` (e.g. `jammy`,
+  `rhel9`). A different value is a 404 with a message naming the right
+  one, so a misconfigured client can't install foreign binaries.
+- **The R minor comes from the `User-Agent`**, e.g.
+  `R (4.4.3 x86_64-pc-linux-gnu …)`, as it does for PPM. Without an R
+  User-Agent, `default_r_minor` is used. Responses carry
+  `Vary: User-Agent`.
+- **`latest` is the only snapshot.** The URL segment is reserved for
+  dated snapshots later.
+- **`PACKAGES` is latest-only,** by R's `package_version` ordering,
+  and carries the dependency fields from each DESCRIPTION. Older and
+  yanked versions are listed in `Meta/archive.rds` (CRAN's structure)
+  and served from `Archive/`, so `remotes::install_version()` and
+  `renv::restore()` of pinned versions work.
 
-When the CRAN-mirror feature lands later, it'll be just another channel — typically named `cran` — served from the same URL pattern.
+**Channels do not overlay each other on the server.** Clients decide composition — they configure an ordered list of channel URLs in `repos =` (packyard alongside upstream CRAN / PPM), exactly like standard R against multiple CRAN mirrors. This keeps the server dumb and moves "which sources this project uses" into the project config, where it belongs.
 
 ---
 
@@ -478,47 +495,35 @@ v1 does **not** run builds on the packyard host. CI builds artifacts per cell an
 
 ### 8.1 Cell
 
-A **cell** is the atomic unit of the matrix. Identity: `(os, os_version, arch, r_minor, builder_image_digest)`. This identity flows into:
-
-- the CAS key for the built binary,
-- the `packyard.lock` platform marker,
-- the download URL (`/<channel>/<R-minor>/bin/linux/<os>-<os_version>-<arch>/...`).
-
-Making the cell identity part of the lockfile and CAS key **from day 1** is free now; retrofitting later would be a schema migration. Glibc/ABI concerns are collapsed into `(os, os_version)`: two cells with the same `(os, os_version)` are considered binary-compatible.
+A **cell** is one R minor version on the deployment's single distro
+and arch: `(distro, arch, r_minor)`, with only `r_minor` varying
+within a deployment. Every deployment supports exactly one Linux
+distribution, the one its Workbench/Connect images use. The cell name
+keys binaries in the DB. The URL doesn't contain it: it is resolved
+from the client's User-Agent (§4).
 
 ### 8.2 Matrix config
 
-Static YAML at `/etc/packyard/matrix.yaml` (path configurable). Loaded at startup; changes require a server restart. Source of truth for the cells the server will index and serve.
+`matrix.yaml`, loaded at startup:
 
 ```yaml
+distro: jammy            # PPM codename: jammy, noble, rhel9, …
+arch: amd64
+default_r_minor: "4.5"   # used when a request carries no R User-Agent
 cells:
-  # shipped defaults: Ubuntu LTS × recent R minors, amd64 only
-  - name: ubuntu-22.04-amd64-r4.4
-    os: ubuntu
-    os_version: "22.04"
-    arch: amd64
+  - name: r-4.4
     r_minor: "4.4"
-    build_image_hint: ghcr.io/rocker-org/r-ver:4.4    # advisory — used by CI, not by the server
-
-  - name: ubuntu-24.04-amd64-r4.5
-    os: ubuntu
-    os_version: "24.04"
-    arch: amd64
+  - name: r-4.5
     r_minor: "4.5"
-    build_image_hint: ghcr.io/rocker-org/r-ver:4.5
-
-  # operator-added
-  - name: rhel9-amd64-r4.4
-    os: rhel
-    os_version: "9"
-    arch: amd64
-    r_minor: "4.4"
-    build_image_hint: internal-registry/r-builder-rhel9:4.4
+  - name: r-4.6
+    r_minor: "4.6"
 ```
 
-**Default shipped matrix (v1):** Ubuntu 22.04 + 24.04 × R 4.3, 4.4, 4.5 × amd64. Everything else (RHEL / Rocky / Alma / SUSE, arm64, Windows, macOS, older R) is BYO cell.
-
-`build_image_hint` is advisory metadata: it tells CI what image to build in so uploads are binary-compatible with the declared cell. The server does not execute it.
+List every R minor the clients run: all the versions the managed
+Workbench/Connect images install. A minor without a cell still works,
+but its users compile everything from source. Adding a cell is a
+restart plus a CI backfill (`GET /api/v1/channels/{c}/missing-binaries`,
+`POST …/binaries/{cell}`). Field reference: [docs/config.md](docs/config.md).
 
 ### 8.3 Upload path
 
@@ -540,133 +545,20 @@ A publish with no matching cell binaries is still valid — it's a source-only p
 
 A reference workflow showing the full flow ships in `/examples/ci/` in the repo — see §8.4.
 
+> **Shipped (Sept 2026):** a publish may carry binaries for only some
+> cells, and the response lists `missing_cells`. Binaries are attached
+> later through `POST /api/v1/packages/{channel}/{name}/{version}/binaries/{cell}`.
+
 ### 8.4 Reference CI workflow
 
-v1 ships a reference workflow template (not a maintained action) at `/examples/ci/publish.yml` in the packyard repository. Users copy it into `.github/workflows/` (or `.gitea/workflows/`) and adapt the matrix + channel mapping. The publish step is plain `curl` against `/api/v1/publish` — no maintained packyard action artifact, no additional CLI dependency.
-
-**Assumptions baked in (all simplest-thing choices):**
-
-- One R package per repository; DESCRIPTION at repo root.
-- Cell images already contain everything the package needs to build. The workflow does not parse `SystemRequirements` or run `apt-get install`. Heavier packages (GDAL, Stan) are the operator's problem: register a fatter cell with a specialised image in `matrix.yaml`.
-- Channel mapping is a hardcoded `case` statement — `main` → `prod`, everything else → `dev`. Users fork and edit the block.
-- GitHub Actions syntax; Gitea Actions is syntactically compatible and runs it as-is (runner labels and action mirror paths may need adjustment in locked-down gitea setups).
-
-**Structure — three jobs:**
-
-1. **`build-source`** — runs once in any R container. `R CMD build .` → source tarball artifact. Emits `package` and `version` as job outputs (read from `DESCRIPTION` with `awk`, no R needed downstream).
-2. **`build-binary`** — matrix job, one instance per cell, runs in the cell's container. Downloads the source artifact, runs `R CMD INSTALL --build`, uploads the binary. Cells fail independently (`fail-fast: false`).
-3. **`publish`** — plain Ubuntu runner (no R), downloads all artifacts, builds the manifest JSON with `jq`, curls multipart to packyard. Uses `--fail-with-body` so a 4xx from the server surfaces the `error_code` / `message` / `hint` from §7.2.
-
-**Reference YAML:**
-
-```yaml
-# /examples/ci/publish.yml — reference template for publishing an R package to packyard.
-# Works on GitHub Actions and Gitea Actions. Requires:
-#   - Repo secret PACKYARD_TOKEN with publish:<channel> scope.
-#   - Repo variable PACKYARD_SERVER (e.g. https://packyard.corp).
-#   - Cells below must match the server's matrix.yaml (GET /api/v1/cells).
-
-name: Publish to packyard
-
-on:
-  push:
-    branches: [main, develop]
-  workflow_dispatch:
-
-jobs:
-  build-source:
-    runs-on: ubuntu-latest
-    container: { image: ghcr.io/rocker-org/r-ver:4.4 }
-    outputs:
-      source_file: ${{ steps.build.outputs.source_file }}
-      package:     ${{ steps.meta.outputs.package }}
-      version:     ${{ steps.meta.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: meta
-        run: |
-          echo "package=$(awk '/^Package:/ {print $2}' DESCRIPTION)" >> "$GITHUB_OUTPUT"
-          echo "version=$(awk '/^Version:/ {print $2}' DESCRIPTION)" >> "$GITHUB_OUTPUT"
-      - id: build
-        run: |
-          R CMD build .
-          echo "source_file=$(ls *.tar.gz | head -n1)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with: { name: source, path: "*.tar.gz" }
-
-  build-binary:
-    needs: build-source
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        cell:
-          - { name: ubuntu-22.04-amd64-r4.4, image: ghcr.io/rocker-org/r-ver:4.4 }
-          - { name: ubuntu-24.04-amd64-r4.5, image: ghcr.io/rocker-org/r-ver:4.5 }
-    container: { image: "${{ matrix.cell.image }}" }
-    steps:
-      - uses: actions/download-artifact@v4
-        with: { name: source }
-      - run: R CMD INSTALL --build ${{ needs.build-source.outputs.source_file }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binary-${{ matrix.cell.name }}
-          path: "*_R_*.tar.gz"
-
-  publish:
-    needs: [build-source, build-binary]
-    runs-on: ubuntu-latest
-    steps:
-      - id: channel
-        run: |
-          case "${{ github.ref }}" in
-            refs/heads/main) echo "name=prod" >> "$GITHUB_OUTPUT" ;;
-            *)               echo "name=dev"  >> "$GITHUB_OUTPUT" ;;
-          esac
-      - uses: actions/download-artifact@v4
-        with: { path: artifacts }
-      - env:
-          PACKYARD_SERVER: ${{ vars.PACKYARD_SERVER }}
-          PACKYARD_TOKEN:  ${{ secrets.PACKYARD_TOKEN }}
-          PKG:           ${{ needs.build-source.outputs.package }}
-          VER:           ${{ needs.build-source.outputs.version }}
-          CHANNEL:       ${{ steps.channel.outputs.name }}
-        run: |
-          set -euo pipefail
-          SOURCE=$(ls artifacts/source/*.tar.gz)
-          MANIFEST=$(jq -n --arg c "$CHANNEL" --arg p "$PKG" --arg v "$VER" \
-            '{channel:$c, package:$p, version:$v, binaries:[]}')
-          CURL_FILES=(-F "source=@$SOURCE;type=application/gzip")
-          for dir in artifacts/binary-*; do
-            CELL=${dir##*/binary-}
-            PART="bin_$(echo "$CELL" | tr -c 'A-Za-z0-9' _)"
-            FILE=$(ls "$dir"/*.tar.gz)
-            MANIFEST=$(echo "$MANIFEST" | jq \
-              --arg cell "$CELL" --arg part "$PART" \
-              '.binaries += [{cell:$cell, part:$part}]')
-            CURL_FILES+=(-F "$PART=@$FILE;type=application/gzip")
-          done
-          echo "$MANIFEST" > manifest.json
-          curl --fail-with-body -X POST \
-            -H "Authorization: Bearer $PACKYARD_TOKEN" \
-            -F "manifest=@manifest.json;type=application/json" \
-            "${CURL_FILES[@]}" \
-            "$PACKYARD_SERVER/api/v1/publish"
-```
-
-**What users customise:**
-
-- The `matrix.cell` list — must match packyard's `matrix.yaml`.
-- The `case` block in `publish.channel` — pick `prod` / `dev` / other on whatever branch or tag convention the team uses.
-- The triggers (`on:` block) — add tag pushes, PR events, schedule, etc.
-- Secrets/variables — `PACKYARD_TOKEN` and `PACKYARD_SERVER` live in the repo's CI settings.
-
-**Explicitly out of scope for v1 reference:**
-
-- Automatic `SystemRequirements` → apt translation. Use a fatter cell image if needed.
-- Monorepo support (multiple packages per repo). Add a `path:` input in v1.x.
-- A maintained `packyard-project/publish@v1` action. Wrapping the curl step into an action is left as a later polish; the template stays curl-based to keep the HTTP API as the canonical publish surface (§6).
-- Smart retries beyond what HTTP client behaviour provides — the server-side idempotency guarantee on immutable channels (§7.4 publish) already makes naive retry safe.
+> **Superseded by [examples/ci/](examples/ci/).** The original
+> three-job GitHub Actions template became two CI-vendor-neutral
+> scripts, which [tests/e2e](tests/e2e/) exercises:
+> `packyard-publish.sh` builds the source and one binary per cell,
+> using every R version under `/opt/R` in a Workbench-style image,
+> and publishes in one request; `packyard-backfill.sh` builds and
+> attaches whatever `missing-binaries` reports. `publish.yml` and the
+> README's Woodpecker snippet are thin wrappers around them.
 
 ### 8.5 Admin commands
 
@@ -1122,11 +1014,11 @@ upstream. Proxy channels are read-only from the operator's POV.
 
 ### 15.7 Footgun rejection
 
-The default channel cannot be `kind: proxy`. Combined with
-`AllowAnonymousReads: true`, the default-channel-proxy combination
-would turn packyard into an unauthenticated cache-fill relay for the
-public internet. `ChannelsConfig.validate()` refuses to load the
-config in that case; there is no flag to override it.
+A proxy channel can be neither the default channel nor set
+`anonymous_reads: true`. Either would turn packyard into an
+unauthenticated cache-fill relay for the public internet.
+`ChannelsConfig.validate()` refuses to load such a config, and there
+is no flag to override it.
 
 ### 15.8 Pinning
 

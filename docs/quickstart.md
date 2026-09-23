@@ -19,24 +19,31 @@ machine.
 ### 1. Start packyard
 
 ```sh
+# Initialise the data volume (default configs, DB, blob store).
+docker run --rm -v packyard-data:/data ghcr.io/schochastics/packyard:latest -init -data /data
+
+# Let R read the prod channel without a token (step 5).
+docker run --rm -i -v packyard-data:/data busybox sh -c 'cat > /data/channels.yaml' <<'EOF'
+channels:
+  - { name: dev,  overwrite_policy: mutable }
+  - { name: test, overwrite_policy: mutable }
+  - { name: prod, overwrite_policy: immutable, default: true, anonymous_reads: true }
+EOF
+
 docker run --rm -d --name packyard \
   -p 8080:8080 \
   -v packyard-data:/data \
   ghcr.io/schochastics/packyard:latest \
-  packyard-server -data /data -allow-anonymous-reads
+  -data /data
 ```
 
 Packyard runs in the foreground of the container with WAL-mode SQLite at
 `/data/db.sqlite` and a content-addressed blob store under `/data/cas/`.
-Default channels `dev` / `test` / `prod` are created on first start; see
-[config.md](config.md) to change them.
+See [config.md](config.md) for the channel and matrix settings.
 
-`-allow-anonymous-reads` opens the **default channel only** to
-unauthenticated CRAN-protocol reads so R's `install.packages()` can
-fetch without a bearer token. Non-default channels (`dev`, `test`)
-stay scoped. For production, remove the flag and have R clients supply
-a token via a custom download method — see [config.md](config.md) and
-[admin.md](admin.md).
+`anonymous_reads: true` opens `prod`'s CRAN-protocol reads to
+unauthenticated clients, so R's `install.packages()` works without a
+bearer token. `dev` and `test` stay scoped, and so does the JSON API.
 
 ### 2. Mint an admin token
 
@@ -60,19 +67,26 @@ git clone git@gitea.cynkra.com:david.schoch/packyard.git
 cd packyard
 make build
 
-# Start the server in the background. A fresh data dir is
-# auto-bootstrapped — db.sqlite, cas/, and default channels.yaml /
-# matrix.yaml are created on first serve.
-./packyard-server -data ./tmpdata -allow-anonymous-reads &
+# Let R read the prod channel without a token (step 5).
+mkdir -p tmpdata
+cat > tmpdata/channels.yaml <<'EOF'
+channels:
+  - { name: dev,  overwrite_policy: mutable }
+  - { name: test, overwrite_policy: mutable }
+  - { name: prod, overwrite_policy: immutable, default: true, anonymous_reads: true }
+EOF
+
+# Start the server in the background. The rest of the data dir
+# (db.sqlite, cas/, matrix.yaml) is created on first serve.
+./packyard-server -data ./tmpdata &
 SERVER_PID=$!
 sleep 0.5
 ```
 
-`-allow-anonymous-reads` is what makes step 5 (R `install.packages()`)
-work without a token — it opens the **default channel only** to
-unauthenticated CRAN-protocol reads. Non-default channels (`dev`,
-`test`) stay scoped. See [config.md](config.md) and
-[admin.md](admin.md) for the production pattern.
+`anonymous_reads: true` is what makes step 5 (R `install.packages()`)
+work without a token. It opens `prod`'s CRAN-protocol reads only;
+`dev`, `test` and the JSON API stay scoped. See
+[config.md](config.md).
 
 Kill the server with `kill $SERVER_PID` when you're done, and
 `rm -rf ./tmpdata` to wipe the throwaway state.
@@ -175,11 +189,9 @@ Everything else stays the same.
 - **409 on republish** — channel is immutable and the version already
   exists with different bytes. Bump `Version:` in DESCRIPTION, or
   publish to a mutable channel (default: `dev`, `test`).
-- **R says `cannot open URL '…/src/contrib/PACKAGES'`** — R sends no
-  bearer token, and packyard's default config rejects anonymous reads
-  with 401. Restart the server with `-allow-anonymous-reads` (or set
-  `allow_anonymous_reads: true` in `server.yaml`). Only the default
-  channel becomes public; `dev` / `test` stay scoped.
+- **R says `cannot open URL '…/src/contrib/PACKAGES'`**: R sends no
+  bearer token, and the channel doesn't allow anonymous reads (401).
+  Set `anonymous_reads: true` on it in `channels.yaml` and restart.
 - **Can't reach `http://localhost:8080/`** — on Linux with rootless
   Docker, the `-p 8080:8080` mapping may need `--publish=host`. Check
   `docker ps` shows the port mapped, and `curl http://localhost:8080/health`.
