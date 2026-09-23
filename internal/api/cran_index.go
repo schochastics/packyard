@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/schochastics/packyard/internal/config"
-	"github.com/schochastics/packyard/internal/upstream"
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/upstream"
 )
 
 // Ways the CRAN-protocol read surface differs from strict CRAN:

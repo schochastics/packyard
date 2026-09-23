@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/schochastics/packyard/internal/api"
-	"github.com/schochastics/packyard/internal/cas"
-	"github.com/schochastics/packyard/internal/config"
-	"github.com/schochastics/packyard/internal/db"
+	"gitea.cynkra.com/david.schoch/packyard/internal/api"
+	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/db"
 )
 
 func newGCTestDeps(t *testing.T) api.Deps {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/packyard/internal/config"
-	"github.com/schochastics/packyard/internal/db"
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/db"
 )
 
 func setupDB(t *testing.T) *db.DB {

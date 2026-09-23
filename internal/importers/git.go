@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/schochastics/packyard/internal/api"
+	"gitea.cynkra.com/david.schoch/packyard/internal/api"
 )
 
 // GitImporter clones an R-package git repo, runs `R CMD build`, and

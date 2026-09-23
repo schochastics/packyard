@@ -83,6 +83,15 @@ behaviour. `ghcr.io/schochastics/packyard:1.0.1` works;
 
 ## Repo gotchas worth memorising
 
+- **Home is `gitea.cynkra.com/david.schoch/packyard` (private).**
+  `origin` points there; the old GitHub repo (now private) is kept as
+  the `github` remote. The Go module path is
+  `gitea.cynkra.com/david.schoch/packyard`; `go install` / `go get`
+  need `GOPRIVATE=gitea.cynkra.com`. **The release pipeline has not
+  moved yet:** `.github/workflows/`, `.goreleaser.yaml` (GitHub release
+  owner, GHCR image) and the "Release cutting" section above still
+  target GitHub/GHCR.
+
 - **Direct push to `main` is blocked in this environment.** After
   committing, report the commit SHA and wait for the user to push.
 - **GHCR packages default to private on first push.** Once a package

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/packyard/internal/config"
-	"github.com/schochastics/packyard/internal/importers"
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/importers"
 )
 
 func TestGitImporterHappyPath(t *testing.T) {

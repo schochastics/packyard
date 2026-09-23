@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/schochastics/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 )
 
 // DeleteResponse is the success body of a hard-delete.

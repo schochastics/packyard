@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/packyard/internal/auth"
-	"github.com/schochastics/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 )
 
 func publishSource(t *testing.T, fx *publishFixture, channel, name, version string, body []byte) {

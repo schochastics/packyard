@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/schochastics/packyard/internal/auth"
+	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
 )
 
 // EventSummary is one row of /api/v1/events. Channel / package /

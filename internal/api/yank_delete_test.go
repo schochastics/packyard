@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/schochastics/packyard/internal/auth"
+	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
 )
 
 // seedPublished inserts a single package on (channel, name, version)

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/schochastics/packyard/openapi"
+	"gitea.cynkra.com/david.schoch/packyard/openapi"
 	"gopkg.in/yaml.v3"
 )
 

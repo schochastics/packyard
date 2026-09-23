@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/schochastics/packyard/internal/api"
+	"gitea.cynkra.com/david.schoch/packyard/internal/api"
 )
 
 // DratImporter walks a drat (or CRAN-shaped) repo over HTTP, fetching

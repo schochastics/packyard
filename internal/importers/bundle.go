@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/schochastics/packyard/internal/api"
-	"github.com/schochastics/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/api"
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 )
 
 // Bundle schemas the importer accepts. v1 is the original source-only

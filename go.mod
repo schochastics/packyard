@@ -1,4 +1,4 @@
-module github.com/schochastics/packyard
+module gitea.cynkra.com/david.schoch/packyard
 
 go 1.25.0
 

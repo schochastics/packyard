@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/schochastics/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 )
 
 // channelCard is one card on the dashboard. Mirrors the shape of

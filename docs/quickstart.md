@@ -56,7 +56,7 @@ dir so it won't collide with an existing packyard install.
 ### 1. Build and start packyard
 
 ```sh
-git clone https://github.com/schochastics/packyard.git
+git clone git@gitea.cynkra.com:david.schoch/packyard.git
 cd packyard
 make build
 

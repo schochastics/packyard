@@ -6,7 +6,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/schochastics/packyard/internal/db"
+	"gitea.cynkra.com/david.schoch/packyard/internal/db"
 )
 
 func openTestDB(t *testing.T) *db.DB {

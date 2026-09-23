@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/schochastics/packyard/internal/config"
+	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 )
 
 func decodeChannels(t *testing.T, src string) (*config.ChannelsConfig, error) {

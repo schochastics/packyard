@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/schochastics/packyard/internal/auth"
+	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
 )
 
 // CellSummary is one row in the /api/v1/cells response. Mirrors the

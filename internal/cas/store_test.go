@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/schochastics/packyard/internal/cas"
+	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
 )
 
 func newStore(t *testing.T) *cas.Store {

@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/schochastics/packyard/internal/store"
-	"github.com/schochastics/packyard/internal/upstream"
+	"gitea.cynkra.com/david.schoch/packyard/internal/store"
+	"gitea.cynkra.com/david.schoch/packyard/internal/upstream"
 )
 
 // handleBinaryPackages serves GET /{channel}/bin/linux/{cell}/PACKAGES.

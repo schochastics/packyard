@@ -30,7 +30,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/schochastics/packyard/internal/version.Version={{.Version}}
+      - -X gitea.cynkra.com/david.schoch/packyard/internal/version.Version={{.Version}}
 
 archives:
   - id: default

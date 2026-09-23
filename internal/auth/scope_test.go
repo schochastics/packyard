@@ -3,7 +3,7 @@ package auth_test
 import (
 	"testing"
 
-	"github.com/schochastics/packyard/internal/auth"
+	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
 )
 
 func TestParseScopes(t *testing.T) {

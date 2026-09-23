@@ -1,8 +1,6 @@
 # packyard
 
-[![CI](https://github.com/schochastics/packyard/actions/workflows/ci.yml/badge.svg)](https://github.com/schochastics/packyard/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/schochastics/packyard?include_prereleases&sort=semver)](https://github.com/schochastics/packyard/releases)
 
 **An open-source, single-binary R package registry for *internal* R
 packages** — think "private CRAN for your organisation". Users point
@@ -99,7 +97,8 @@ Download the matching tarball from
 [GitHub releases](https://github.com/schochastics/packyard/releases), or:
 
 ```sh
-go install github.com/schochastics/packyard/cmd/packyard-server@latest
+# The repo is private: tell Go to skip the public proxy and use your git credentials.
+GOPRIVATE=gitea.cynkra.com go install gitea.cynkra.com/david.schoch/packyard/cmd/packyard-server@latest
 packyard-server -data ./data
 ```
 

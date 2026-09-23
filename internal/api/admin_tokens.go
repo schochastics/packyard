@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/schochastics/packyard/internal/auth"
+	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
 )
 
 // scopeRE matches an individual scope entry. Validates shape at the
