@@ -29,5 +29,5 @@
 /data/
 /_dev/
 
-.admin.cache/
+.cache/
 .admin
