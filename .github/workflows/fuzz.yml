@@ -1,0 +1,45 @@
+name: Fuzz
+
+on:
+  schedule:
+    # Nightly at 05:17 UTC — off-peak, avoids the top-of-hour rush.
+    - cron: "17 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - FuzzPublishManifest
+          - FuzzPublishMultipartBody
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: Fuzz ${{ matrix.target }}
+        run: |
+          go test -run '^$' \
+            -fuzz '^${{ matrix.target }}$' \
+            -fuzztime 2m \
+            ./internal/api/
+
+      - name: Upload failure corpus
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: internal/api/testdata/fuzz/${{ matrix.target }}/
+          if-no-files-found: ignore

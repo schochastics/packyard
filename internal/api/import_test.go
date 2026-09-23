@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 func newImportTestDeps(t *testing.T, channel, policy string) Deps {

@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/api"
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/importers"
+	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/importers"
 )
 
 // buildTestBundle writes a v2 source-shaped CRAN bundle under root and

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func setupIndexDB(t *testing.T) *db.DB {

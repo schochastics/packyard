@@ -11,11 +11,11 @@ import (
 	"sync"
 	"time"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/rds"
-	"gitea.cynkra.com/david.schoch/packyard/internal/rpkg"
-	"gitea.cynkra.com/david.schoch/packyard/internal/rversion"
-	"gitea.cynkra.com/david.schoch/packyard/internal/upstream"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/rds"
+	"github.com/schochastics/packyard/internal/rpkg"
+	"github.com/schochastics/packyard/internal/rversion"
+	"github.com/schochastics/packyard/internal/upstream"
 )
 
 // How the CRAN-protocol index is built for local channels:

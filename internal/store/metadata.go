@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/rpkg"
+	"github.com/schochastics/packyard/internal/rpkg"
 )
 
 // indexFieldsJSON reads the DESCRIPTION from the source tarball at

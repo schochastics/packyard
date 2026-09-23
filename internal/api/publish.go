@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"regexp"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/store"
 )
 
 // maxRequestBytes caps a single publish upload. 2 GiB is well above the

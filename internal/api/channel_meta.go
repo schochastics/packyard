@@ -3,7 +3,7 @@ package api
 import (
 	"context"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 // channelMeta bundles the config-side facts about a channel that

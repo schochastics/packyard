@@ -26,7 +26,7 @@ ARG TARGETOS=linux
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
     -trimpath \
-    -ldflags "-s -w -X gitea.cynkra.com/david.schoch/packyard/internal/version.Version=${VERSION}" \
+    -ldflags "-s -w -X github.com/schochastics/packyard/internal/version.Version=${VERSION}" \
     -o /out/packyard-server \
     ./cmd/packyard-server
 

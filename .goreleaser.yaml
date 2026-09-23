@@ -1,11 +1,10 @@
 # GoReleaser config for packyard.
 # https://goreleaser.com
 #
-# A v* tag push runs .woodpecker/release.yml, which runs
-# `goreleaser release --clean` with GITEA_TOKEN set. Artifacts on the
-# Gitea release: Linux amd64 + arm64 tarballs (primary), Darwin amd64 +
-# arm64 tarballs (best-effort), checksums, and SBOMs. The container
-# image is built by a separate buildx step in the same pipeline.
+# A v* tag push triggers .github/workflows/release.yml, which runs
+# `goreleaser release --clean`. Artifacts: Linux amd64 + arm64 tarballs
+# (primary), Darwin amd64 + arm64 tarballs (best-effort), a multi-arch
+# Docker image on ghcr.io/schochastics/packyard, checksums, and SBOMs.
 
 version: 2
 
@@ -31,7 +30,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X gitea.cynkra.com/david.schoch/packyard/internal/version.Version={{.Version}}
+      - -X github.com/schochastics/packyard/internal/version.Version={{.Version}}
 
 archives:
   - id: default
@@ -50,14 +49,64 @@ checksum:
   name_template: "checksums.txt"
 
 snapshot:
+  # No `+` build-metadata suffix: Docker tag grammar forbids it, and we
+  # want snapshot builds to exercise the same Docker path as releases.
   version_template: "{{ incpatch .Version }}-dev-{{ .ShortCommit }}"
 
 sboms:
   - artifacts: archive
 
+dockers:
+  - id: packyard-amd64
+    image_templates:
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-amd64"
+    goos: linux
+    goarch: amd64
+    dockerfile: Dockerfile.release
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=Single-binary R package
+        registry for internal packages."
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/schochastic\
+        s/packyard"
+      - "--label=org.opencontainers.image.licenses=MIT"
+  - id: packyard-arm64
+    image_templates:
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-arm64"
+    goos: linux
+    goarch: arm64
+    dockerfile: Dockerfile.release
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=Single-binary R package
+        registry for internal packages."
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.source=https://github.com/schochastic\
+        s/packyard"
+      - "--label=org.opencontainers.image.licenses=MIT"
+
+docker_manifests:
+  - name_template: "ghcr.io/schochastics/packyard:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-amd64"
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/schochastics/packyard:latest"
+    image_templates:
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-amd64"
+      - "ghcr.io/schochastics/packyard:{{ .Version }}-arm64"
+
 changelog:
   sort: asc
-  use: git
+  use: github
   groups:
     - title: Features
       regexp: "^feat(\\(.+\\))?:"
@@ -75,16 +124,9 @@ changelog:
       - Merge pull request
       - Merge branch
 
-gitea_urls:
-  api: https://gitea.cynkra.com/api/v1
-  download: https://gitea.cynkra.com
-
-# Only GITEA_TOKEN is set in CI; don't let a stray GITHUB_TOKEN win.
-force_token: gitea
-
 release:
-  gitea:
-    owner: david.schoch
+  github:
+    owner: schochastics
     name: packyard
   draft: false
   prerelease: auto
@@ -94,4 +136,4 @@ release:
   footer: |
     ---
 
-    Image: `gitea.cynkra.com/david.schoch/packyard:{{ .Version }}`
+    See [implementation.md](implementation.md) for what's shipped in each phase.

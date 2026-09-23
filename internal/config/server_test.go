@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 func decodeServer(t *testing.T, src string) (*config.ServerConfig, error) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
-	"gitea.cynkra.com/david.schoch/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func setupTokenDB(t *testing.T) *db.DB {

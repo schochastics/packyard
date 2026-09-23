@@ -1,6 +1,6 @@
 // Command packyard-server is the packyard package registry server.
 //
-// See https://gitea.cynkra.com/david.schoch/packyard for documentation.
+// See https://github.com/schochastics/packyard for documentation.
 package main
 
 import (
@@ -21,14 +21,14 @@ import (
 	"syscall"
 	"time"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/api"
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/db"
-	"gitea.cynkra.com/david.schoch/packyard/internal/metrics"
-	"gitea.cynkra.com/david.schoch/packyard/internal/store"
-	"gitea.cynkra.com/david.schoch/packyard/internal/version"
+	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/metrics"
+	"github.com/schochastics/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/version"
 )
 
 func main() {

@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 func TestRunHealthcheck(t *testing.T) {

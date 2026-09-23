@@ -1,0 +1,36 @@
+name: CRAN e2e
+
+# End-to-end suite: packyard in a container, publishes through the
+# reference CI scripts, then install.packages(), remotes, renv and pak
+# from real R 4.4 / 4.5 clients on Ubuntu 22.04 and AlmaLinux 9. The
+# scenarios live in tests/e2e/ and run anywhere Docker does
+# (`make e2e`); this workflow only calls that target.
+#
+# Nightly + manual only: the client images are large. The HTTP-level
+# protocol tests in internal/api/cran_protocol_test.go run on push.
+
+on:
+  schedule:
+    - cron: "37 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: e2e (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [jammy, rhel9]
+    steps:
+      - uses: actions/checkout@v4
+      - run: make e2e E2E_DISTROS=${{ matrix.distro }}
+      - name: Server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.distro }}
+          path: tests/e2e/out/

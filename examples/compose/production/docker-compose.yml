@@ -4,7 +4,7 @@
 
 services:
   packyard:
-    image: ${PACKYARD_IMAGE:-gitea.cynkra.com/david.schoch/packyard:latest}
+    image: ${PACKYARD_IMAGE:-ghcr.io/schochastics/packyard:latest}
     command: ["-config", "/etc/packyard/server.yaml"]
     ports:
       - "8080:8080"          # put the TLS-terminating reverse proxy in front
@@ -26,7 +26,7 @@ services:
   # the host (cron / systemd timer):
   #   docker compose --profile backup run --rm backup
   backup:
-    image: ${PACKYARD_IMAGE:-gitea.cynkra.com/david.schoch/packyard:latest}
+    image: ${PACKYARD_IMAGE:-ghcr.io/schochastics/packyard:latest}
     profiles: [backup]
     command: ["admin", "-config", "/etc/packyard/server.yaml", "backup", "-out", "/backup/packyard"]
     volumes:

@@ -29,7 +29,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/store"
 )
 
 // ErrTooLarge is returned when an upstream response exceeds the

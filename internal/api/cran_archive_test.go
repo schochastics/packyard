@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/rds"
+	"github.com/schochastics/packyard/internal/rds"
 )
 
 // rTarball builds a gzipped R package tarball whose DESCRIPTION holds

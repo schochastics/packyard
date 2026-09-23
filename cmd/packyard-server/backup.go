@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
-	"gitea.cynkra.com/david.schoch/packyard/internal/backup"
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/version"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/backup"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/version"
 )
 
 // adminBackup snapshots the data dir (-out) or checks a snapshot

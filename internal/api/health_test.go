@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/api"
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func newTestDeps(t *testing.T) api.Deps {

@@ -10,7 +10,7 @@ info:
     at the top of the URL tree) is what R clients such as `install.packages`,
     `renv`, and `pak` hit directly.
 
-    See https://gitea.cynkra.com/david.schoch/packyard for docs and the
+    See https://github.com/schochastics/packyard for docs and the
     implementation plan.
   version: 0.1.0
   license:

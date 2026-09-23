@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 // defaults + caps for list pagination. Kept as consts so any future

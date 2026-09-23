@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/cas"
 )
 
 func seedBlob(t *testing.T, s *cas.Store, data []byte) (sum string, size int64) {

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 // CreateTokenRequest is the JSON body of POST /api/v1/admin/tokens.

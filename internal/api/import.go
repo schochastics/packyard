@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/store"
 )
 
 // storeService returns deps.Store, lazy-initializing it from deps.DB

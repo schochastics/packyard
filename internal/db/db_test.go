@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func TestOpenAppliesPragmas(t *testing.T) {

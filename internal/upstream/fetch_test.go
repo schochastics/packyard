@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
-	"gitea.cynkra.com/david.schoch/packyard/internal/store"
-	"gitea.cynkra.com/david.schoch/packyard/internal/upstream"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/upstream"
 )
 
 // fixture is a Fetcher backed by a real CAS rooted in a temp dir, plus

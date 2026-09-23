@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"net/http"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 // ChannelSummary is one row in the /api/v1/channels response. Flat

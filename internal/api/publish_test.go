@@ -15,10 +15,10 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 // publishTestFixture seeds a DB, CAS, matrix and two channels: "dev"

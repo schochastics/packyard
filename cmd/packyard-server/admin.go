@@ -10,11 +10,11 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/api"
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/importers"
-	"gitea.cynkra.com/david.schoch/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/api"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/importers"
+	"github.com/schochastics/packyard/internal/store"
 )
 
 // adminMain is the entry point for `packyard-server admin …`. Kept out

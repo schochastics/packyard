@@ -7,7 +7,7 @@ import (
 	"sort"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 func TestEmbeddedDefaultsAreValid(t *testing.T) {

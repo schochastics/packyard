@@ -23,7 +23,7 @@ import (
 	"io"
 	"time"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 // BlobRef is the result of writing one tarball to CAS — the

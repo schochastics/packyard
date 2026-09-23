@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 func doAdmin(t *testing.T, fx *publishFixture, method, url, token, body string) *httptest.ResponseRecorder {

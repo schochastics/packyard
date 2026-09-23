@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 func decodeMatrix(t *testing.T, src string) (*config.MatrixConfig, error) {

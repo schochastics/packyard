@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net/http"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/auth"
 )
 
 const (

@@ -13,17 +13,15 @@ machine.
 
 ## Docker
 
-> The image lives in the Gitea registry at
-> `gitea.cynkra.com/david.schoch/packyard`, which is private. Run
-> `docker login gitea.cynkra.com` first; any Gitea access token with
-> `read:package` works as the password. Without access, use
+> The image is `ghcr.io/schochastics/packyard`. If you can't pull it
+> (for example while the package is private), use
 > [From source](#from-source).
 
 ### 1. Start packyard
 
 ```sh
 # Initialise the data volume (default configs, DB, blob store).
-docker run --rm -v packyard-data:/data gitea.cynkra.com/david.schoch/packyard:latest -init -data /data
+docker run --rm -v packyard-data:/data ghcr.io/schochastics/packyard:latest -init -data /data
 
 # Let R read the prod channel without a token (step 5).
 docker run --rm -i -v packyard-data:/data busybox sh -c 'cat > /data/channels.yaml' <<'EOF'
@@ -36,7 +34,7 @@ EOF
 docker run --rm -d --name packyard \
   -p 8080:8080 \
   -v packyard-data:/data \
-  gitea.cynkra.com/david.schoch/packyard:latest \
+  ghcr.io/schochastics/packyard:latest \
   -data /data
 ```
 
@@ -66,7 +64,7 @@ dir so it won't collide with an existing packyard install.
 ### 1. Build and start packyard
 
 ```sh
-git clone git@gitea.cynkra.com:david.schoch/packyard.git
+git clone https://github.com/schochastics/packyard.git
 cd packyard
 make build
 

@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/backup"
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
-	"gitea.cynkra.com/david.schoch/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/backup"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 type dataDir struct {

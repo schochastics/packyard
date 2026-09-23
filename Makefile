@@ -2,7 +2,7 @@
 
 BIN          := packyard-server
 CMD_DIR      := ./cmd/packyard-server
-VERSION_PKG  := gitea.cynkra.com/david.schoch/packyard/internal/version
+VERSION_PKG  := github.com/schochastics/packyard/internal/version
 VERSION      := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS      := -s -w -X $(VERSION_PKG).Version=$(VERSION)
 

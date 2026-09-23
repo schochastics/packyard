@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/store"
-	"gitea.cynkra.com/david.schoch/packyard/internal/upstream"
+	"github.com/schochastics/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/upstream"
 )
 
 // errNoUpstreamFetcher fires when a proxy-channel handler runs without

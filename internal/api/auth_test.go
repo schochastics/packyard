@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
-	"gitea.cynkra.com/david.schoch/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/auth"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/db"
 )
 
 func newAuthTestDeps(t *testing.T) Deps {

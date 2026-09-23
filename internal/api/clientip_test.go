@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/metrics"
+	"github.com/schochastics/packyard/internal/metrics"
 )
 
 func TestForwardedClientIP(t *testing.T) {

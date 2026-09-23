@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/config"
 )
 
 // Token sources, as stored in tokens.source.

@@ -5,13 +5,13 @@ import (
 	"net/http"
 	"net/netip"
 
-	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
-	"gitea.cynkra.com/david.schoch/packyard/internal/config"
-	"gitea.cynkra.com/david.schoch/packyard/internal/db"
-	"gitea.cynkra.com/david.schoch/packyard/internal/metrics"
-	"gitea.cynkra.com/david.schoch/packyard/internal/store"
-	"gitea.cynkra.com/david.schoch/packyard/internal/ui"
-	"gitea.cynkra.com/david.schoch/packyard/internal/upstream"
+	"github.com/schochastics/packyard/internal/cas"
+	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/db"
+	"github.com/schochastics/packyard/internal/metrics"
+	"github.com/schochastics/packyard/internal/store"
+	"github.com/schochastics/packyard/internal/ui"
+	"github.com/schochastics/packyard/internal/upstream"
 )
 
 // Deps is the set of services API handlers reach for. Assembled once at

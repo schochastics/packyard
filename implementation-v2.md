@@ -423,7 +423,7 @@ In [docs/admin.md](docs/admin.md):
 
 ### 7.3 Release pipeline on Gitea (needs the CI platform decision)
 
-> **Done (Sept 2026):** Woodpecker. `.woodpecker/ci.yml`, `release.yml` (GoReleaser → Gitea release; buildx → `gitea.cynkra.com/david.schoch/packyard:X.Y.Z` + `:latest`, amd64 + arm64) and `fuzz.yml`. GitHub workflows, GHCR and `Dockerfile.release` removed. `make e2e` stays manual (no Docker on the runners).
+> **Reverted (Sept 2026):** the repo moved back to GitHub; CI and releases are the GitHub Actions workflows again (GoReleaser → GitHub release + GHCR). Briefly implemented before that: `.woodpecker/ci.yml`, `release.yml` (GoReleaser → Gitea release; buildx → `gitea.cynkra.com/david.schoch/packyard:X.Y.Z` + `:latest`, amd64 + arm64) and `fuzz.yml`. GitHub workflows, GHCR and `Dockerfile.release` removed. `make e2e` stays manual (no Docker on the runners).
 
 - Port `ci.yml` (vet, lint, test, openapi-lint), the release job and `make e2e` to the chosen CI: Woodpecker as in managed-infra, or Gitea Actions.
 - **GoReleaser:**
