@@ -1,9 +1,18 @@
-# CI: vet, race tests, lint, OpenAPI lint and a build smoke test on
-# every push to main, every pull request, and on demand.
+# CI: vet, race tests, build smoke test, lint and OpenAPI lint on every
+# push to main, every pull request, and on demand.
 #
-# The four checks run in parallel (depends_on: []). make e2e needs a
-# Docker daemon, which the Kubernetes runners don't have; run it on a
-# Docker host before tagging (tests/e2e/README.md).
+# Steps run one after another in the shared workspace, so modules are
+# downloaded and the dependency tree (modernc.org/sqlite is large) is
+# compiled once: GOCACHE/GOMODCACHE live under /woodpecker/src/.cache,
+# on the volume all steps share. Running them as parallel pods would repeat that work in
+# each pod and multiply peak memory.
+#
+# The CPU limit matters: Go sizes GOMAXPROCS from the cgroup CPU limit
+# and otherwise from the node's cores, which on a large node means
+# dozens of parallel compiles and an OOM kill without any log line.
+#
+# make e2e needs a Docker daemon, which the Kubernetes runners don't
+# have; run it on a Docker host before tagging (tests/e2e/README.md).
 
 when:
   - event: push
@@ -14,8 +23,15 @@ when:
 steps:
   test:
     image: golang:1.25
-    depends_on: []
+    environment: &goenv
+      GOCACHE: /woodpecker/src/.cache/go-build
+      GOMODCACHE: /woodpecker/src/.cache/mod
+      GOLANGCI_LINT_CACHE: /woodpecker/src/.cache/golangci-lint
     commands:
+      # The workspace is owned by another uid than the container user;
+      # without this git refuses to run ("dubious ownership"), which
+      # breaks the tidy check and Go's VCS stamping.
+      - git config --global --add safe.directory "$CI_WORKSPACE"
       - go mod tidy
       - git diff --exit-code -- go.mod go.sum || { echo "go.mod/go.sum not tidy; run 'go mod tidy'"; exit 1; }
       - go vet ./...
@@ -24,10 +40,11 @@ steps:
       kubernetes:
         resources:
           requests:
-            memory: 1000Mi
+            memory: 1500Mi
             cpu: 1000m
           limits:
-            memory: 2000Mi
+            memory: 4000Mi
+            cpu: 2000m
         nodeSelector:
           CI: "woodpecker"
         tolerations:
@@ -35,26 +52,26 @@ steps:
             operator: "Exists"
             effect: "NoSchedule"
 
+  build:
+    image: golang:1.25
+    environment: *goenv
+    commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
+      - make build
+      - ./packyard-server -version
+    backend_options: *resources
+
   lint:
     image: golangci/golangci-lint:v2.5.0
-    depends_on: []
+    environment: *goenv
     commands:
+      - git config --global --add safe.directory "$CI_WORKSPACE"
       - golangci-lint run ./...
     backend_options: *resources
 
   openapi-lint:
-    image: golang:1.25
-    depends_on: []
+    image: dshanley/vacuum:v0.30.6
     commands:
-      - go install github.com/daveshanley/vacuum@latest
       # Errors gate; stylistic warnings are tracked separately.
       - vacuum lint --errors openapi/openapi.yaml
-    backend_options: *resources
-
-  build:
-    image: golang:1.25
-    depends_on: []
-    commands:
-      - make build
-      - ./packyard-server -version
     backend_options: *resources
