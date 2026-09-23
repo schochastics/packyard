@@ -218,6 +218,8 @@ Explicitly *not* targeting:
 
 ### A5. CRAN-protocol read surface — ~5 days
 
+> **Superseded.** The `/{channel}/{r-minor}/…` layout below was never shipped. The current URL layout is described in [implementation-v2.md](implementation-v2.md) Phase 2 and [docs/api.md](docs/api.md).
+
 **Deliverables:** R clients (base, renv, pak) can install published packages from packyard.
 
 **Tasks:**

@@ -185,6 +185,8 @@ The target is a ten-minute `scp`-and-`systemctl-start` deploy on a single VM. Sc
 
 ## 4. URL layout
 
+> **Superseded.** This section describes the original design. The shipped layout differs: see [implementation-v2.md](implementation-v2.md) Phase 2 and [docs/api.md](docs/api.md).
+
 CRAN-protocol-compatible so any R client (base, renv, pak, uvr, rv) works out of the box:
 
 ```

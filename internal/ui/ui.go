@@ -343,6 +343,7 @@ func (h *Handler) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	value := signSessionCookie(tok, h.deps.SessionKey)
+	//nolint:gosec // G124: Secure is deliberately config-driven (off only for plain-HTTP dev setups); HttpOnly and SameSite are set.
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    value,
@@ -356,6 +357,7 @@ func (h *Handler) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
+	//nolint:gosec // G124: Secure is deliberately config-driven (off only for plain-HTTP dev setups); HttpOnly and SameSite are set.
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
