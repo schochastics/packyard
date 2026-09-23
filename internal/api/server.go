@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"net/netip"
 
 	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
 	"gitea.cynkra.com/david.schoch/packyard/internal/config"
@@ -28,6 +29,9 @@ type Deps struct {
 	Upstream        *upstream.Fetcher // optional; NewMux fills in if nil (proxy channels need it)
 	UISessionKey    []byte            // HMAC key for /ui/ session cookies; empty disables the UI
 	UISecureCookies bool              // mark /ui/ cookies Secure (production)
+	PublicURL       string            // external base URL (server.yaml public_url); UI snippets
+	TrustedProxies  []netip.Prefix    // peers whose X-Forwarded-For is believed
+	SeparateMetrics bool              // /metrics is served by MetricsHandler on its own listener
 }
 
 // NewMux builds the top-level HTTP handler: the http.ServeMux of
@@ -35,6 +39,7 @@ type Deps struct {
 // http.Server{Handler: ...}.
 //
 // Middleware order (outermost first):
+//  0. clientIPMiddleware  — RemoteAddr from X-Forwarded-For, trusted peers only
 //  1. requestIDMiddleware — tag every request with an X-Request-Id
 //  2. accessLogMiddleware — one structured log line per request
 //  3. recoveryMiddleware  — convert panics into 500 JSON envelopes
@@ -65,7 +70,9 @@ func NewMux(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", handleHealth(deps))
-	mux.Handle("GET /metrics", handleMetrics(deps))
+	if !deps.SeparateMetrics {
+		mux.Handle("GET /metrics", handleMetrics(deps))
+	}
 	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}", handlePublish(deps))
 	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}/yank", handleYank(deps))
 	mux.HandleFunc("DELETE /api/v1/packages/{channel}/{name}/{version}", handleDelete(deps))
@@ -124,6 +131,7 @@ func NewMux(deps Deps) http.Handler {
 			Matrix:        deps.Matrix,
 			SessionKey:    deps.UISessionKey,
 			SecureCookies: deps.UISecureCookies,
+			PublicURL:     deps.PublicURL,
 		})
 		if err != nil {
 			// Unreachable in practice: only SessionKey emptiness and
@@ -151,6 +159,7 @@ func NewMux(deps Deps) http.Handler {
 	}
 
 	return chain(mux,
+		clientIPMiddleware(deps.TrustedProxies),
 		requestIDMiddleware,
 		metricsMiddleware(deps),
 		accessLogMiddleware,

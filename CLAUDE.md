@@ -54,8 +54,13 @@ pre-v2 module path installs an incompatible v1.x release.
   server inserts channels present in YAML but missing from the DB,
   and warns on channels present in the DB but absent from YAML. It
   never deletes DB rows — that would silently orphan packages.
-- **`BeginTx(ctx, nil)` currently starts a deferred tx.** Flagged
-  for `BEGIN IMMEDIATE` in v1.1 (implementation.md §Post-v1 follow-ups).
+- **`BeginTx(ctx, nil)` starts `BEGIN IMMEDIATE`** (`_txlock=immediate`
+  in the DSN, [internal/db/db.go](internal/db/db.go)). Every tx is a
+  write; readers use plain queries.
+- **`server.yaml` `tokens:` are reconciled on every start**
+  (`auth.SyncConfigTokens`): insert, rescope, revoke-if-removed, for
+  `tokens.source = 'config'` rows only. The API refuses to revoke
+  config tokens.
 - **Server auto-bootstraps a fresh data dir on `runServe`.** Missing
   `channels.yaml` / `matrix.yaml` are written from embedded defaults
   before the server starts listening. `-init` is only needed if you

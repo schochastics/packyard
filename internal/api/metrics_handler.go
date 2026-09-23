@@ -50,3 +50,12 @@ func metricsMiddleware(deps Deps) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// MetricsHandler serves /metrics for a separate listener
+// (server.yaml metrics_listen). deps.Metrics must be the same
+// instance passed to NewMux, or the scrape sees none of its counters.
+func MetricsHandler(deps Deps) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", handleMetrics(deps))
+	return mux
+}

@@ -1,216 +1,160 @@
 # Backup & restore
 
-Packyard stores everything in the data directory (`-data <dir>`,
-default `/data` in the Docker image). Protecting that one directory is
-the whole backup story — there is no external database or object store
-to coordinate with.
+Packyard keeps everything in its data directory (`-data <dir>`).
+Protecting that one directory is the whole backup story: there is no
+external database or object store to coordinate with. Three admin
+commands cover it:
 
-This runbook covers what to back up, how to take a consistent
-snapshot while the server is running, and how to restore from a
-backup on a fresh host.
+| Command | What it does | Server running? |
+|---|---|---|
+| `admin backup -out <dir>` | consistent snapshot of DB, blobs and config | yes, safe |
+| `admin backup -verify <dir>` | re-hash every blob, check references, `PRAGMA integrity_check` | n/a |
+| `admin restore -from <dir> [-data <dir>] [-force]` | verify, then lay the backup into a data dir | **no**, stop it first |
 
 ## What's in the data directory
 
 ```
 <data-dir>/
   db.sqlite           # catalog: channels, packages, binaries, events, tokens
-  db.sqlite-wal       # WAL file (present while the server runs)
-  db.sqlite-shm       # shared memory index (present while the server runs)
-  cas/                # content-addressed blob store: source + binary tarballs
-    <aa>/<rest-of-sha256>
-    ...
-  channels.yaml       # channel set (usually also tracked in git)
-  matrix.yaml         # binary cell matrix (usually also tracked in git)
+  db.sqlite-wal/-shm  # present while the server runs
+  cas/<aa>/<rest>     # content-addressed blobs: source + binary tarballs
+  channels.yaml       # channel set (unless channels_file points elsewhere)
+  matrix.yaml         # distro + R versions (unless matrix_file points elsewhere)
+  ui-session-key      # HMAC key for UI cookies; not backed up (users log in again)
 ```
 
-What matters:
+Tokens live in `db.sqlite`, and only as `sha256(token)`. Restoring a
+backup keeps every token working. Losing the DB without a backup
+means reissuing all of them (see [Reissuing tokens](#reissuing-tokens)).
 
-- **`db.sqlite`** — the catalog of packages, event log, token hashes.
-  Losing this loses everything; CAS blobs without DB rows are orphans.
-- **`cas/`** — every published tarball. Losing this loses the
-  artifacts themselves; DB rows without CAS blobs are broken.
-- **`channels.yaml` / `matrix.yaml`** — configuration. Typically
-  tracked in git alongside your infrastructure code, so backing them
-  up with the data dir is belt-and-braces.
-
-Tokens live **only** in `db.sqlite` and only as `sha256(token)`. A
-restore from backup keeps existing tokens working; a lost DB means
-every token has to be reissued (see [Reissuing tokens](#reissuing-tokens)).
-
-## Taking a consistent snapshot
-
-### SQLite — use `VACUUM INTO` or the online backup API
-
-The catalog runs in WAL mode (`journal_mode=WAL`), so a plain
-`cp db.sqlite backup.sqlite` under load can capture an inconsistent
-mid-transaction state: the file you copy won't contain recent writes
-still held in `db.sqlite-wal`, and you can end up with a torn read if
-the server checkpoints mid-copy.
-
-**Do not `cp` / `rsync` `db.sqlite` while the server is running.**
-
-Use one of these instead:
+## Taking a backup
 
 ```sh
-# Option 1: VACUUM INTO — single-file dump, consistent, also defragments.
-sqlite3 <data-dir>/db.sqlite "VACUUM INTO '/backup/db-$(date -u +%Y%m%dT%H%M%SZ).sqlite'"
-
-# Option 2: .backup — uses SQLite's online backup API; safe under concurrent writes.
-sqlite3 <data-dir>/db.sqlite ".backup '/backup/db-$(date -u +%Y%m%dT%H%M%SZ).sqlite'"
+packyard-server admin -data /data backup -out /backup/packyard
+# backup written to /backup/packyard: blobs=412 (3 new) size=1.2 GiB config=[channels.yaml matrix.yaml]
 ```
 
-Both produce a single `.sqlite` file that is a point-in-time
-consistent snapshot and can be restored by dropping it back in
-place. `.backup` is the one to reach for if the DB is under active
-write load; `VACUUM INTO` is simpler and also compacts, but takes a
-longer write lock.
+With `-config /etc/packyard/server.yaml` in front of the verb, the
+data dir and config paths come from that file, and `server.yaml` is
+included in the backup too.
 
-### CAS — rsync is safe
+What it writes:
 
-Blobs in `cas/` are written atomically (temp-file-then-rename) and
-keyed by `sha256(content)`, so any file at `cas/<aa>/<rest>` either
-doesn't exist yet or has its final content. A concurrent `rsync` on
-the live directory will:
+```
+<out>/db.sqlite         VACUUM INTO snapshot, transactionally consistent
+<out>/cas/<aa>/<rest>   every blob the snapshot references
+<out>/config/*.yaml     server.yaml (with -config), channels.yaml, matrix.yaml
+<out>/manifest.json     time, packyard version, schema version, blob count and bytes
+```
 
-- Include blobs that finished writing before rsync walked them.
-- Miss blobs that landed after rsync's directory walk — those will be
-  picked up by the next backup run.
-- **Never** capture a half-written blob, because half-written blobs
-  live under `cas/tmp/` (not under `cas/<aa>/`) until they rename.
+- **Consistent while serving.** The DB snapshot is a single
+  transaction, and the blob list is read from the snapshot, not from
+  the live DB. Every row in the backup therefore has its blob.
+- **Incremental.** Blobs never change, so backing up into the same
+  `<out>` again only adds the new ones. Blobs are hardlinked when
+  `<out>` is on the same filesystem as the data dir and copied
+  otherwise. Put backups on different storage for real protection;
+  a same-disk backup only guards against mistakes, not disk failure.
+- **Rotation.** For dated snapshots, back up into a new directory
+  each time and let `rsync --link-dest` (or a snapshotting
+  filesystem) share unchanged blobs:
 
-A typical nightly looks like:
+  ```sh
+  today=/backup/packyard-$(date -u +%Y%m%d)
+  packyard-server admin -data /data backup -out /backup/packyard-staging
+  rsync -a --link-dest=/backup/packyard-latest /backup/packyard-staging/ "$today/"
+  ln -sfn "$today" /backup/packyard-latest
+  ```
+
+- **Not included:** token secret files referenced by `server.yaml`
+  `tokens:` (they live in your secret store) and `ui-session-key`.
+
+In Docker, run it inside the container with the backup target mounted:
 
 ```sh
-rsync -a --delete-after <data-dir>/cas/ /backup/cas/
+docker compose exec packyard packyard-server admin -data /data backup -out /backup/packyard
 ```
 
-Do the rsync **after** the SQLite snapshot so every DB row references
-a blob that's already on disk. The other order risks backing up DB
-rows for blobs that haven't been copied yet.
-
-### Config files — copy with the rest
+## Verifying
 
 ```sh
-cp <data-dir>/channels.yaml <data-dir>/matrix.yaml /backup/
+packyard-server admin backup -verify /backup/packyard
+# integrity_check: ok
+# blobs re-hashed: 412
+# missing: 0
+# corrupt: 0
 ```
 
-These change rarely; if you already track them in git, the git copy
-is authoritative and this step is redundant.
+Exits non-zero on any problem and lists the affected blobs. Run it
+after each backup, or at least on a schedule. It reads every byte, so
+it is the check that catches silent storage rot.
 
 ## Cadence
 
-Tune to your tolerance for losing publishes. A reasonable starting
-point for a small team:
-
-| What | How often | Retention |
+| Publish rate | Backup | Verify |
 |---|---|---|
-| `db.sqlite` via `.backup` | **Hourly** | 7 × hourly + 30 × daily |
-| `cas/` via `rsync` | **Daily** | 30 × daily |
-| `channels.yaml` / `matrix.yaml` | On change (git) | Git history |
+| a few packages a week | daily | weekly |
+| every CI run | hourly | daily |
 
-If you publish rarely (say, a handful of packages per week), a daily
-SQLite backup is enough. If you publish on every CI run, an hourly
-SQLite backup keeps the worst-case data loss window small, while the
-daily CAS rsync is fine because old blobs never change — only new
-blobs are added, and a missed new blob just means a re-publish.
-
-Keep at least one backup on a different host or storage tier from the
-live data. A backup on the same disk protects against accidental `rm
--rf`, not against disk failure.
+A backup is cheap after the first one: a DB snapshot plus the handful
+of new blobs.
 
 ## Restoring
 
-On a clean host:
-
-1. Install the same packyard version that produced the backup
-   (`packyard-server -version` on the old host tells you which).
-   Restoring a newer backup onto an older binary may fail schema
-   validation; restoring an older backup onto a newer binary will run
-   pending migrations at startup, which is safe but not reversible.
-
-2. Lay the data directory back out:
+1. Stop the server.
+2. Restore:
 
    ```sh
-   mkdir -p /data
-   cp /backup/db-<timestamp>.sqlite /data/db.sqlite
-   rsync -a /backup/cas/ /data/cas/
-   cp /backup/channels.yaml /backup/matrix.yaml /data/   # if not in git
-   chown -R <packyard-user>:<packyard-user> /data
+   packyard-server admin restore -from /backup/packyard -data /data
    ```
 
-   Do **not** restore `db.sqlite-wal` or `db.sqlite-shm` — they're
-   artifacts of the running server and SQLite recreates them on
-   startup from the consistent snapshot.
+   Restore verifies the backup first and refuses a damaged one. It
+   also refuses a data dir that already holds a database or blobs
+   unless given `-force`. `-force` replaces `db.sqlite` and `cas/`.
+   Stale `db.sqlite-wal`/`-shm` files are removed too.
 
-3. Start the server:
+   `channels.yaml` and `matrix.yaml` are written only when their
+   effective path is inside the data dir, and without `-force` only
+   when absent. Files managed elsewhere, such as a read-only config
+   mount or `server.yaml`, are reported with the path of the backup's
+   copy.
+3. Fix ownership if you restored as root. The image runs as
+   uid/gid 65532:
 
    ```sh
-   packyard-server -data /data
+   chown -R 65532:65532 /data
    ```
 
-   It will apply any pending migrations, reconcile `channels.yaml`
-   against the DB, and start serving.
-
-4. Verify integrity (next section).
-
-## Verifying a restore
-
-After restore, two checks catch the common failure modes:
-
-```sh
-# 1. Does the DB open cleanly? Migrations applied?
-packyard-server -init -data /data
-# → prints "storage ready: db=... cas=..." and exits 0 on success.
-
-# 2. Does every DB row point to a blob that exists, and vice versa?
-packyard-server admin -data /data reindex
-```
-
-`admin reindex` walks the DB, regenerates PACKAGES caches, and
-reports any DB rows whose CAS blob is missing. A clean report means
-the restore is consistent. Missing blobs mean the CAS rsync was
-incomplete — re-run it and re-check.
-
-Then spot-check a real install:
-
-```sh
-# From a machine with R:
-R -e 'install.packages("<some-pkg>", repos = "http://<restored-host>:8080/")'
-```
-
-If install succeeds, the read surface is working.
+4. Start the server. It applies pending migrations, so restoring an
+   older backup onto a newer packyard works. There are no down
+   migrations, so a backup made by a newer packyard needs that
+   version or later.
+5. Spot-check: `admin reindex` must report no missing blobs, and an
+   `install.packages()` from the restored server should succeed.
 
 ## Reissuing tokens
 
-Tokens are stored as `sha256(token)`, so:
+- **Restoring a backup keeps every token valid.** CI keeps its secret.
+- **Tokens from `server.yaml` `tokens:`** come back on the next start
+  from their secret files, whatever the state of the DB.
+- **Minted tokens, if the DB is lost without a backup,** are gone.
+  The server only ever had their hashes. Mint new ones and rotate
+  them in every CI config:
 
-- **Restoring from a real backup keeps all existing tokens valid** —
-  CI doesn't need to learn a new secret.
-- **Losing the DB means all tokens are gone.** Clients have the
-  plaintext token; the server has only the hash and can't recompute
-  it. There is no recovery path other than issuing fresh tokens and
-  rotating the secret in every CI config that publishes.
-
-If you've lost the DB:
-
-```sh
-# Mint a fresh admin token on the new data dir.
-ADMIN=$(packyard-server -mint-token -data /data -scopes admin -label bootstrap)
-# Then use it to reissue publish tokens via POST /api/v1/admin/tokens.
-```
-
-See [admin.md](admin.md) for the full token-management flow.
+  ```sh
+  ADMIN=$(packyard-server -mint-token -data /data -scopes admin -label bootstrap)
+  # then POST /api/v1/admin/tokens with it
+  ```
 
 ## Disaster recovery drill
 
-Once a quarter (or before a big release), prove the runbook actually
-works:
+Once a quarter, prove the runbook works:
 
-1. On a throwaway host, restore the latest backup.
-2. Run `admin reindex` — should report clean.
-3. `install.packages()` a known package from the restored server.
-4. Publish a fresh test package; yank it; delete it.
+1. On a throwaway host, `admin restore` the latest backup.
+2. Start the server and run `admin reindex`. It should report clean.
+3. `install.packages()` a known package from it.
+4. Publish a test package, yank it, delete it.
 5. Tear the host down.
 
-Any step that fails is a bug in the runbook or in the backup
-pipeline. Fix it now, not during a real outage.
+Anything that fails is a bug in the runbook or the backup pipeline.
+Fix it now, not during an outage.

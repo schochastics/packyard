@@ -152,7 +152,7 @@ components:
 
     TokenSummary:
       type: object
-      required: [id, label, scopes, created_at]
+      required: [id, label, scopes, created_at, source]
       properties:
         id:
           type: integer
@@ -175,6 +175,12 @@ components:
           format: date-time
           nullable: true
           description: Set when revoked; absent for active tokens.
+        source:
+          type: string
+          enum: [api, config]
+          description: |
+            `api` for tokens minted at runtime, `config` for tokens
+            provisioned from `tokens:` in server.yaml.
 
     ListTokensResponse:
       type: object
@@ -644,7 +650,9 @@ paths:
       summary: Revoke a token
       description: |
         Stamps `revoked_at` on the row. Idempotent — revoking an already-
-        revoked token is a 200 no-op. Returns 404 for unknown ids.
+        revoked token is a 200 no-op. Returns 404 for unknown ids, and
+        409 for tokens provisioned from server.yaml: remove those from
+        the config instead, and the next start revokes them.
       operationId: revokeToken
       tags: [admin]
       parameters:
@@ -665,6 +673,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   # ---- Channels ------------------------------------------------------
   /api/v1/channels:

@@ -33,6 +33,10 @@ COPY --from=build /out/packyard-server /usr/local/bin/packyard-server
 # TLS roots for outbound HTTPS (distroless/static ships them but we make it explicit).
 # Data directory is expected to be a mount point at /data.
 USER nonroot:nonroot
+# WORKDIR creates directories owned by USER. /backup is the mount point
+# for `admin backup -out /backup/...`; owning it lets a named volume
+# mounted there start out writable (distroless has no shell to chown).
+WORKDIR /backup
 WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 8080

@@ -74,6 +74,16 @@ func TestDecodeServerValidation(t *testing.T) {
 			yaml:    "tls_key: /etc/packyard/key.pem",
 			wantMsg: "tls_cert is empty",
 		},
+		{"public_url relative", "public_url: packages.example.org", "absolute http(s) URL"},
+		{"public_url with path", "public_url: https://example.org/packyard", "must not have a path"},
+		{"trusted proxy garbage", "trusted_proxies: [10.0.0.0/8, nope]", `"nope" is not an IP`},
+		{"metrics_listen no port", "metrics_listen: localhost", "metrics_listen"},
+		{"metrics_listen equals listen", "listen: :8080\nmetrics_listen: :8080", "must differ"},
+		{"token without label", "tokens:\n  - scopes: admin\n    token_file: /x", "label is required"},
+		{"token without scopes", "tokens:\n  - label: a\n    token_file: /x", "scopes is required"},
+		{"token without secret", "tokens:\n  - label: a\n    scopes: admin", "exactly one of"},
+		{"token with both secrets", "tokens:\n  - label: a\n    scopes: admin\n    token_file: /x\n    sha256_file: /y", "exactly one of"},
+		{"duplicate token labels", "tokens:\n  - {label: a, scopes: admin, token_file: /x}\n  - {label: a, scopes: admin, token_file: /y}", "duplicate label"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -87,6 +97,37 @@ func TestDecodeServerValidation(t *testing.T) {
 				t.Errorf("error %q does not contain %q", err.Error(), tc.wantMsg)
 			}
 		})
+	}
+}
+
+func TestDecodeServerProxyAndMetricsKeys(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := decodeServer(t, `
+public_url: https://packages.example.org/
+trusted_proxies: [10.0.0.0/8, 192.168.1.7, "::1"]
+metrics_listen: 127.0.0.1:9090
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PublicURL != "https://packages.example.org" {
+		t.Errorf("PublicURL = %q, want trailing slash trimmed", cfg.PublicURL)
+	}
+	if !cfg.SecureCookies() {
+		t.Error("SecureCookies() = false with an https public_url")
+	}
+	got := cfg.TrustedProxyPrefixes()
+	if len(got) != 3 || got[0].String() != "10.0.0.0/8" || got[1].String() != "192.168.1.7/32" || got[2].String() != "::1/128" {
+		t.Errorf("TrustedProxyPrefixes = %v", got)
+	}
+
+	plain, err := decodeServer(t, "public_url: http://packages.internal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.SecureCookies() {
+		t.Error("SecureCookies() = true with an http public_url and no TLS")
 	}
 }
 
@@ -118,6 +159,10 @@ data_dir: subdir
 channels_file: ../channels.yaml
 tls_cert: /abs/cert.pem
 tls_key: /abs/key.pem
+tokens:
+  - label: ci
+    scopes: publish:prod
+    token_file: secrets/ci
 `
 	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
@@ -141,6 +186,9 @@ tls_key: /abs/key.pem
 	}
 	if !cfg.TLSEnabled() {
 		t.Error("TLSEnabled() = false with both cert and key set")
+	}
+	if want := filepath.Join(dir, "secrets/ci"); cfg.Tokens[0].TokenFile != want {
+		t.Errorf("Tokens[0].TokenFile = %q, want %q", cfg.Tokens[0].TokenFile, want)
 	}
 }
 

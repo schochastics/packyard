@@ -279,3 +279,39 @@ func TestRevokeIdempotent(t *testing.T) {
 		t.Errorf("second revoke: %d, want 200 (idempotent)", second.Code)
 	}
 }
+
+func TestConfigTokensListedAndNotRevocable(t *testing.T) {
+	t.Parallel()
+
+	fx := newPublishFixture(t)
+	res, err := fx.deps.DB.ExecContext(context.Background(), `
+		INSERT INTO tokens(token_sha256, scopes_csv, label, source)
+		VALUES ('00ff', 'publish:prod', 'from-config', 'config')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := res.LastInsertId()
+
+	rec := doAdmin(t, fx, http.MethodGet, "/api/v1/admin/tokens", fx.token, "")
+	var list ListTokensResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	sources := map[string]string{}
+	for _, tok := range list.Tokens {
+		sources[tok.Label] = tok.Source
+	}
+	if sources["from-config"] != "config" {
+		t.Errorf("sources = %v, want from-config=config", sources)
+	}
+	for label, src := range sources {
+		if label != "from-config" && src != "api" {
+			t.Errorf("token %q source = %q, want api", label, src)
+		}
+	}
+
+	rec = doAdmin(t, fx, http.MethodDelete, fmt.Sprintf("/api/v1/admin/tokens/%d", id), fx.token, "")
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "server.yaml") {
+		t.Errorf("revoke config token: status %d body %s", rec.Code, rec.Body.String())
+	}
+}

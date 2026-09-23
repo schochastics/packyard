@@ -1,0 +1,10 @@
+# The one Linux distribution the R clients run, and the R versions
+# they use. CI builds a binary per cell.
+distro: jammy
+arch: amd64
+default_r_minor: "4.5"
+cells:
+  - name: r-4.4
+    r_minor: "4.4"
+  - name: r-4.5
+    r_minor: "4.5"

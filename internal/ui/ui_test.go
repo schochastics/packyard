@@ -357,10 +357,20 @@ func TestChannelDetailRenders(t *testing.T) {
 		t.Fatalf("status = %d; body:\n%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"foo", "1.0.0", "bar", "0.2.1", "ci-bot", "yanked", "bad build", "mutable"} {
+	for _, want := range []string{"foo", "1.0.0", "bar", "0.2.1", "ci-bot", "yanked", "bad build", "mutable",
+		"http://example.com/dev"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
 		}
+	}
+
+	// With public_url set, snippets use it instead of the request host.
+	h.deps.PublicURL = "https://packages.example.org"
+	h.deps.Matrix = &config.MatrixConfig{Distro: "rhel9"}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if want := "https://packages.example.org/dev/__linux__/rhel9/latest"; !strings.Contains(rec.Body.String(), want) {
+		t.Errorf("body missing %q", want)
 	}
 }
 

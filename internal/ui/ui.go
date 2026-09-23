@@ -22,6 +22,7 @@ type Deps struct {
 	Matrix        *config.MatrixConfig // optional; /ui/cells renders empty if nil
 	SessionKey    []byte               // HMAC key for the session cookie; must be non-empty
 	SecureCookies bool                 // set Secure flag on Set-Cookie (production)
+	PublicURL     string               // external base URL for copy-paste snippets; "" = derive from the request
 }
 
 // Handler is the packyard UI handler. Expected mount point is /ui/ on the
@@ -214,6 +215,12 @@ func (h *Handler) handleHome(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// repoURLs are the repos= values an R user configures for a channel.
+type repoURLs struct {
+	Source string // src/contrib only
+	Linux  string // binaries for the server's distro, source fallback; "" without a matrix
+}
+
 func (h *Handler) handleChannelDetail(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.sessionIdentity(r)
 	if !ok {
@@ -230,12 +237,26 @@ func (h *Handler) handleChannelDetail(w http.ResponseWriter, r *http.Request) {
 		h.renderError(w, r, err)
 		return
 	}
+	base := h.deps.PublicURL
+	if base == "" {
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		base = scheme + "://" + r.Host
+	}
+	repo := repoURLs{Source: base + "/" + name}
+	if h.deps.Matrix != nil {
+		repo.Linux = base + "/" + name + "/__linux__/" + h.deps.Matrix.Distro + "/latest"
+	}
 	h.renderPage(w, r, "channel_detail.html", struct {
 		viewData
 		Data *channelDetailData
+		Repo repoURLs
 	}{
 		viewData: viewData{Title: "Channel " + name, Identity: &id},
 		Data:     data,
+		Repo:     repo,
 	})
 }
 

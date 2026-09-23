@@ -40,20 +40,90 @@ matrix_file:   "matrix.yaml"      # default <data_dir>/matrix.yaml
 tls_cert: ""
 tls_key:  ""
 
-# Default channel's CRAN-protocol reads are public when true. Every
-# non-CRAN endpoint still requires a token. The CLI flag
-# -allow-anonymous-reads overrides this — see admin.md.
-allow_anonymous_reads: false
+# Behind a reverse proxy (see below).
+public_url: "https://packages.example.org"
+trusted_proxies: ["10.0.0.0/8"]
+
+# Serve /metrics on its own listener instead of the main one.
+metrics_listen: "127.0.0.1:9090"
+
+# API tokens provisioned from secret files (see below).
+tokens:
+  - label: ci-publish-prod
+    scopes: publish:prod,yank:prod
+    token_file: /run/secrets/packyard/ci-publish-prod
+  - label: workbench-read
+    scopes: read:*
+    sha256_file: /run/secrets/packyard/workbench-read.sha256
 ```
+
+Anonymous CRAN-protocol reads are set per channel in `channels.yaml`
+(`anonymous_reads`), not here.
+
+### Running behind a reverse proxy
+
+- **`public_url`** is the external base URL: a scheme and host, no
+  path. Packyard needs a dedicated hostname because the UI templates
+  hard-code `/ui/…`, so subpath deployments aren't supported. An
+  `https://` value marks UI cookies `Secure` even when TLS terminates
+  at the proxy. The UI also builds its copy-paste `repos =` snippets
+  from it; without it, they use the request's `Host`.
+- **`trusted_proxies`** lists CIDRs or bare IPs whose
+  `X-Forwarded-For` (or, failing that, `X-Real-IP`) is believed. The
+  access log then records the client address instead of the proxy's.
+  The chain is read right to left, skipping trusted hops, so a client
+  can't spoof its address by sending its own header. Requests from
+  any other peer are logged with their socket address.
+
+### Separate metrics listener
+
+With `metrics_listen` set, `/metrics` is served only on that address
+and removed from the main listener. Use it to keep the scrape
+endpoint on a container-internal network while the main port is
+published. Without it, `/metrics` is on the main listener, as before.
+
+### Tokens from config
+
+`tokens:` declares API tokens whose secrets come from files, typically
+secrets mounted by the orchestrator. Each entry needs a `label`,
+`scopes` (comma-separated, the same scopes `-mint-token` takes) and
+exactly one of:
+
+- **`token_file`** holds the plaintext token (`pkm_…`). Surrounding
+  whitespace is ignored.
+- **`sha256_file`** holds the hex sha256 of the token, so the
+  plaintext never reaches the server host.
+
+`packyard-server admin token-gen` prints a fresh token on line 1 and
+its sha256 on line 2. Store the token in CI and the hash on the server.
+
+On every start the server reconciles config tokens in one
+transaction:
+
+- a new entry is inserted;
+- an entry whose label or scopes changed is updated;
+- a token no longer listed is revoked. This includes the old secret
+  of a rotated entry.
+
+Tokens minted with `-mint-token` or the API are never touched. A
+missing or malformed secret file fails startup. Config tokens show
+`"source": "config"` in `GET /api/v1/admin/tokens`, and the API
+refuses to revoke them (409): remove them from the config instead.
 
 ### Validation
 
 - `listen` must be non-empty.
 - `data_dir` must be non-empty.
 - `tls_cert` and `tls_key` must either both be set or both be empty.
-- Relative paths in the YAML are resolved against the YAML file's
-  directory (not packyard's CWD) so a config placed in `/etc/packyard/`
-  behaves predictably regardless of how the server is launched.
+- `public_url` must be an absolute `http(s)` URL without a path.
+- `trusted_proxies` entries must be IPs or CIDRs.
+- `metrics_listen` must be `host:port` and differ from `listen`.
+- `tokens`: labels are required and unique; `scopes` must be
+  non-empty; set exactly one of `token_file` or `sha256_file`.
+- Relative paths in the YAML, token files included, are resolved
+  against the YAML file's directory, not packyard's CWD. A config
+  placed in `/etc/packyard/` behaves the same however the server is
+  launched.
 
 ## `channels.yaml`
 
@@ -85,6 +155,7 @@ channels:
 | `name` | yes | `[a-z0-9]([a-z0-9-]*[a-z0-9])?`, max 63 chars. Appears in URLs and tokens, so keep it short. |
 | `overwrite_policy` | yes | `mutable` or `immutable` (see below). |
 | `default` | no | Bool. Exactly one channel must be `true` — that's the channel served at the `/src/contrib/…` alias. |
+| `anonymous_reads` | no | Bool, default `false`. When `true`, the channel's CRAN-protocol reads (`PACKAGES`, tarballs, `Archive/`, `Meta/archive.rds`) need no token. Everything else, including the JSON API, still does. Not allowed on proxy channels. |
 
 ### Overwrite policy
 

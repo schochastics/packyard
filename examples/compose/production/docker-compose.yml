@@ -1,0 +1,40 @@
+# Production-shaped packyard deployment: read-only config, tokens
+# provisioned from secret files, /metrics on an internal port, and a
+# backup job. See README.md in this folder.
+
+services:
+  packyard:
+    image: ${PACKYARD_IMAGE:-ghcr.io/schochastics/packyard:latest}
+    command: ["-config", "/etc/packyard/server.yaml"]
+    ports:
+      - "8080:8080"          # put the TLS-terminating reverse proxy in front
+    expose:
+      - "9090"               # metrics_listen: reachable on the compose network only
+    volumes:
+      - packyard-data:/data
+      - ./config:/etc/packyard:ro
+      - ./secrets:/run/secrets/packyard:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/packyard-server", "-config", "/etc/packyard/server.yaml", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # One-shot backup into the packyard-backup volume. Schedule it from
+  # the host (cron / systemd timer):
+  #   docker compose --profile backup run --rm backup
+  backup:
+    image: ${PACKYARD_IMAGE:-ghcr.io/schochastics/packyard:latest}
+    profiles: [backup]
+    command: ["admin", "-config", "/etc/packyard/server.yaml", "backup", "-out", "/backup/packyard"]
+    volumes:
+      - packyard-data:/data
+      - packyard-backup:/backup
+      - ./config:/etc/packyard:ro
+      - ./secrets:/run/secrets/packyard:ro
+
+volumes:
+  packyard-data:
+  packyard-backup:

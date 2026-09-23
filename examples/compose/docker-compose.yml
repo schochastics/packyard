@@ -24,8 +24,8 @@ services:
       - packyard-data:/data
     restart: unless-stopped
     healthcheck:
-      # Distroless has no curl/wget; shell out to the binary itself.
-      test: ["CMD", "/usr/local/bin/packyard-server", "-version"]
+      # Distroless has no curl/wget; the binary probes its own /health.
+      test: ["CMD", "/usr/local/bin/packyard-server", "-healthcheck"]
       interval: 30s
       timeout: 3s
       retries: 3

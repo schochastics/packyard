@@ -6,11 +6,13 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,6 +26,7 @@ import (
 	"gitea.cynkra.com/david.schoch/packyard/internal/cas"
 	"gitea.cynkra.com/david.schoch/packyard/internal/config"
 	"gitea.cynkra.com/david.schoch/packyard/internal/db"
+	"gitea.cynkra.com/david.schoch/packyard/internal/metrics"
 	"gitea.cynkra.com/david.schoch/packyard/internal/store"
 	"gitea.cynkra.com/david.schoch/packyard/internal/version"
 )
@@ -49,6 +52,8 @@ func main() {
 		mintToken   = flag.Bool("mint-token", false, "issue a new API token and exit (prints plaintext once)")
 		tokenScopes = flag.String("scopes", "", "comma-separated scopes for -mint-token (e.g. 'publish:*,read:*,admin')")
 		tokenLabel  = flag.String("label", "", "human-readable label for -mint-token")
+		healthcheck = flag.Bool("healthcheck", false, "GET /health on the local server and exit 0 if it answers 200 (for container health checks)")
+		healthURL   = flag.String("healthcheck-url", "", "with -healthcheck: URL to probe (default: derived from the listen address)")
 	)
 	flag.Parse()
 
@@ -66,6 +71,12 @@ func main() {
 	}
 
 	switch {
+	case *healthcheck:
+		if err := runHealthcheck(cfg, *healthURL); err != nil {
+			fmt.Fprintf(os.Stderr, "packyard-server: healthcheck: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	case *initStorage:
 		if err := runInit(cfg, config.BootstrapOptions{Distro: *initDistro}); err != nil {
 			fmt.Fprintf(os.Stderr, "packyard-server: init failed: %v\n", err)
@@ -254,6 +265,12 @@ func runServe(cfg *config.ServerConfig) error {
 		slog.Info("backfilled package metadata", "packages", bf.Packages, "binaries", bf.Binaries)
 	}
 
+	if res, err := auth.SyncConfigTokens(context.Background(), database.DB, cfg.Tokens); err != nil {
+		return fmt.Errorf("provision tokens from config: %w", err)
+	} else if len(res.Created)+len(res.Updated)+len(res.Revoked) > 0 {
+		slog.Info("synced config tokens", "created", res.Created, "updated", res.Updated, "revoked", res.Revoked)
+	}
+
 	uiKey, err := loadOrCreateUISessionKey(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("ui session key: %w", err)
@@ -270,8 +287,12 @@ func runServe(cfg *config.ServerConfig) error {
 		Matrix:          matrix,
 		Channels:        channels,
 		Server:          cfg,
+		Metrics:         metrics.New(),
 		UISessionKey:    uiKey,
-		UISecureCookies: cfg.TLSEnabled(),
+		UISecureCookies: cfg.SecureCookies(),
+		PublicURL:       cfg.PublicURL,
+		TrustedProxies:  cfg.TrustedProxyPrefixes(),
+		SeparateMetrics: cfg.MetricsListen != "",
 	}
 	srv := &http.Server{
 		Addr:              cfg.Listen,
@@ -286,7 +307,19 @@ func runServe(cfg *config.ServerConfig) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
+	var metricsSrv *http.Server
+	if cfg.MetricsListen != "" {
+		metricsSrv = &http.Server{
+			Addr:              cfg.MetricsListen,
+			Handler:           api.MetricsHandler(deps),
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+		go func() {
+			slog.Info("metrics listening", "addr", cfg.MetricsListen)
+			errCh <- metricsSrv.ListenAndServe()
+		}()
+	}
 	go func() {
 		slog.Info("packyard-server listening",
 			"addr", cfg.Listen,
@@ -312,10 +345,50 @@ func runServe(cfg *config.ServerConfig) error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if metricsSrv != nil {
+		_ = metricsSrv.Shutdown(shutdownCtx)
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown: %w", err)
 	}
 	slog.Info("packyard-server stopped")
+	return nil
+}
+
+// runHealthcheck probes the running server's /health. The distroless
+// image has no curl, so container health checks run the binary itself:
+//
+//	healthcheck: ["CMD", "/usr/local/bin/packyard-server", "-healthcheck"]
+//
+// Without an explicit URL it probes 127.0.0.1 on the configured listen
+// port. Certificate verification is skipped for https: the probe
+// targets loopback, where the certificate's names never match.
+func runHealthcheck(cfg *config.ServerConfig, url string) error {
+	if url == "" {
+		_, port, err := net.SplitHostPort(cfg.Listen)
+		if err != nil {
+			return fmt.Errorf("listen %q: %w", cfg.Listen, err)
+		}
+		scheme := "http"
+		if cfg.TLSEnabled() {
+			scheme = "https"
+		}
+		url = scheme + "://127.0.0.1:" + port + "/health"
+	}
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // G402: loopback probe, see above
+		},
+	}
+	resp, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("%s: status %d", url, resp.StatusCode)
+	}
 	return nil
 }
 

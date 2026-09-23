@@ -63,6 +63,12 @@ func adminMain(args []string) error {
 		return adminReindex(cfg, rest[1:])
 	case "missing-binaries":
 		return adminMissingBinaries(cfg, rest[1:])
+	case "backup":
+		return adminBackup(cfg, *configPath, rest[1:])
+	case "restore":
+		return adminRestore(cfg, rest[1:])
+	case "token-gen":
+		return adminTokenGen(rest[1:])
 	default:
 		return adminUsageError("admin: unknown verb %q", rest[0])
 	}
@@ -766,7 +772,10 @@ verbs:
   cells show <cell-name>
   missing-binaries -channel <name> [-cell <cell>]
   gc [-dry-run]
-  reindex`
+  reindex
+  backup -out <dir> | -verify <dir>
+  restore -from <dir> [-data <dir>] [-force]
+  token-gen`
 
 // newTabWriter produces a stdout-backed writer with consistent column
 // padding for every admin subcommand.

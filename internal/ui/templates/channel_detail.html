@@ -12,6 +12,13 @@
   <div class="total"><span class="num">{{fmtTime .Data.Meta.CreatedAt}}</span><span class="lbl">created</span></div>
 </section>
 
+<h2>Use from R</h2>
+<pre class="snippet"><code>options(repos = c(
+  {{.Data.Meta.Name}} = "{{if .Repo.Linux}}{{.Repo.Linux}}{{else}}{{.Repo.Source}}{{end}}",
+  CRAN = "https://packagemanager.posit.co/cran/latest"
+))</code></pre>
+{{if .Repo.Linux}}<p class="muted">Binaries for the R version in the request's User-Agent, source otherwise. Source-only URL: <code>{{.Repo.Source}}</code></p>{{end}}
+
 <h2>Packages</h2>
 {{if .Data.Packages}}
 <table class="events">

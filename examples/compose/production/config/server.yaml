@@ -1,0 +1,20 @@
+listen: ":8080"
+data_dir: /data
+
+# Config lives on the read-only mount, not in the data volume.
+channels_file: channels.yaml
+matrix_file: matrix.yaml
+
+# TLS terminates at the reverse proxy.
+public_url: https://packages.example.org
+trusted_proxies: ["172.16.0.0/12"]   # the proxy's docker network
+
+metrics_listen: ":9090"
+
+tokens:
+  - label: ci-publish
+    scopes: publish:prod,publish:test,yank:prod,yank:test
+    token_file: /run/secrets/packyard/ci-publish
+  - label: admin
+    scopes: admin
+    sha256_file: /run/secrets/packyard/admin.sha256

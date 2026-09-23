@@ -25,14 +25,21 @@ shutdown; in-flight publishes get a chance to finish.
 
 Prints the version string and exits.
 
-### `packyard-server -data <dir> -allow-anonymous-reads`
+### `packyard-server -healthcheck [-healthcheck-url <url>]`
 
-Starts the server with `allow_anonymous_reads` forced on regardless of
-what `server.yaml` says. Opens the **default channel only** to
-unauthenticated CRAN-protocol reads — useful for local smoke tests
-and for deployments that want `install.packages()` to work without R
-clients carrying a bearer token. Non-default channels stay scoped.
-See [config.md](config.md) for the YAML equivalent.
+GETs `/health` and exits 0 on 200, 1 otherwise, with a 3 s timeout.
+The distroless image has no curl, so container health checks run the
+binary itself:
+
+```yaml
+healthcheck:
+  test: ["CMD", "/usr/local/bin/packyard-server", "-healthcheck"]
+```
+
+Without `-healthcheck-url` it probes `127.0.0.1` on the port from the
+listen address. Pass `-config` so it sees a non-default `listen`.
+Over TLS, certificate verification is skipped, because the probe
+targets loopback.
 
 ### `packyard-server -mint-token -data <dir> -scopes <csv> [-label <s>]`
 
@@ -254,6 +261,34 @@ prod     foo      1.0.0    binary/ubuntu-24.04-amd64-r-4.5  def…
 Non-zero exit when any mismatches are found, so the command composes
 in healthcheck scripts.
 
+### `admin backup -out <dir>` / `admin backup -verify <dir>`
+
+`-out` writes a consistent snapshot of the DB, every referenced blob
+and the config files into `<dir>`. It is safe while the server runs,
+and it is incremental when `<dir>` is reused. `-verify` re-hashes
+every blob in a backup, checks that the DB's references are all
+present, and runs `PRAGMA integrity_check`; it exits non-zero on any
+problem. See [backup-restore.md](backup-restore.md).
+
+### `admin restore -from <dir> [-data <dir>] [-force]`
+
+Verifies a backup and writes it into the data dir. The server must be
+stopped. It refuses a data dir that already has a DB or blobs unless
+given `-force`.
+
+### `admin token-gen`
+
+Prints a new token on line 1 and its sha256 on line 2, and touches no
+database. Use it for [tokens provisioned from config](config.md#tokens-from-config).
+The CI secret gets the token; the server gets a `sha256_file` with
+the hash.
+
+### `admin missing-binaries -channel <name> [-cell <cell>]`
+
+Lists, for the current version of every package on the channel, the
+cells with no binary. This is the work list after adding an R version
+to `matrix.yaml`.
+
 ## Admin HTTP endpoints
 
 All under `/api/v1/admin/`. Every endpoint requires the `admin` scope.
@@ -273,11 +308,14 @@ curl -X POST http://packyard.corp/api/v1/admin/tokens \
 ### `GET /api/v1/admin/tokens`
 
 List tokens. `last_used_at` tells you whether a token is still in use.
+`source` is `api` for minted tokens and `config` for tokens from
+`server.yaml`.
 
 ### `DELETE /api/v1/admin/tokens/{id}`
 
 Revoke. Immediate effect — packyard resolves the token against the DB on
-every request.
+every request. Config tokens are refused with 409; remove them from
+`server.yaml` and restart instead.
 
 ## Observability
 
@@ -298,7 +336,8 @@ Subsystem checks:
 
 ### `/metrics`
 
-Public Prometheus text format. A hermetic registry is used, so only
+Public Prometheus text format, on the main listener, or only on
+`metrics_listen` when that is set ([config.md](config.md#separate-metrics-listener)). A hermetic registry is used, so only
 packyard-owned metrics appear (no Go stdlib metrics leaking through).
 
 | Metric | Labels | Meaning |
@@ -316,7 +355,9 @@ packyard-owned metrics appear (no Go stdlib metrics leaking through).
 
 Every request produces one structured log line on stderr (slog
 `INFO`): `method`, `path`, `status`, `bytes`, `duration_ms`,
-`remote`, `request_id`. The same `request_id` appears in every error
+`remote`, `user_agent`, `request_id`. Behind a proxy listed in
+`trusted_proxies`, `remote` is the client address from
+`X-Forwarded-For`. The same `request_id` appears in every error
 envelope body so a 500 can be correlated with its log line.
 
 ### Audit log
@@ -328,8 +369,55 @@ writes a row to the `events` table. Read it via
 
 ## Upgrade procedure
 
-Packyard ships a single binary; upgrade is SIGTERM the old one, swap
-the binary, start the new one. Migrations run on start if needed.
-Always back up `<data-dir>/` before a non-patch upgrade (the phased
-rollout of schema changes in implementation.md §A2 means this should
-be low-risk, but a snapshot is cheap).
+1. `admin backup -out <dir>`, then `admin backup -verify <dir>`.
+2. Pull the new image (or swap the binary) and restart. Migrations
+   are applied on startup.
+3. There are no down migrations. To roll back, restore the backup
+   onto the old version.
+
+Read the release notes first. Until adoption picks up, v1.x releases
+may contain breaking changes, and the notes call each one out.
+
+## Permissions
+
+The image runs as uid/gid 65532 (distroless `nonroot`). A bind-mounted
+data dir must be owned accordingly:
+
+```sh
+chown -R 65532:65532 /srv/packyard/data
+```
+
+Named Docker volumes get the right ownership automatically on first
+use. Config files and token secrets only need to be readable by that
+uid, and can be mounted read-only.
+
+## Restarts and config changes
+
+- `server.yaml`, `channels.yaml` and `matrix.yaml` are read at start.
+  Changes take effect on restart.
+- Channel reconcile only adds. A channel removed from `channels.yaml`
+  keeps its DB row and packages, and the server warns at startup.
+- Removing a cell from `matrix.yaml` makes its binaries unreachable,
+  and clients on that R version fall back to source. The blobs stay
+  referenced until the rows are deleted.
+- Adding a cell: clients on that R version get source until CI
+  backfills binaries (`admin missing-binaries`,
+  `examples/ci/packyard-backfill.sh`).
+- Config tokens are reconciled on every start (see
+  [config.md](config.md#tokens-from-config)).
+
+## Running as a service
+
+A production deployment typically has:
+
+- **Config mounted read-only:** `server.yaml` with `channels_file`
+  and `matrix_file` pointing into the mount, `public_url`,
+  `trusted_proxies` for the reverse proxy, `metrics_listen` on an
+  internal address, and `tokens:` for CI and read-only clients.
+- **Data dir** on a volume owned by 65532.
+- **Health check:** `packyard-server -config … -healthcheck`.
+- **Scheduled backup:** `admin backup -out` hourly or daily into
+  storage outside the data volume, plus a periodic `-verify`.
+
+[examples/compose/production/](../examples/compose/production/) puts
+all of these together.

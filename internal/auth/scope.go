@@ -13,8 +13,18 @@
 package auth
 
 import (
+	"regexp"
 	"strings"
 )
+
+// scopeRE matches an individual scope entry. Kept permissive enough to
+// accept the ones we ship (publish:dev, read:*, yank:test, admin) plus
+// hyphens and underscores for future-compat.
+var scopeRE = regexp.MustCompile(`^[a-z][a-z0-9_-]*(:([a-z0-9_*-]+))?$`)
+
+// ValidScope reports whether s is a well-formed scope. Checked
+// wherever scopes enter the DB, so bad ones never reach it.
+func ValidScope(s string) bool { return scopeRE.MatchString(s) }
 
 // Wildcard matches any target within a given verb, e.g. publish:*.
 const Wildcard = "*"

@@ -1,0 +1,7 @@
+channels:
+  - name: test
+    overwrite_policy: mutable
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+    anonymous_reads: true

@@ -4,22 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"gitea.cynkra.com/david.schoch/packyard/internal/auth"
 )
-
-// scopeRE matches an individual scope entry. Validates shape at the
-// API boundary so bad scopes can never reach the DB. Kept permissive
-// enough to accept the ones we ship (publish:dev, read:*, yank:test,
-// admin) plus hyphens and underscores for future-compat.
-var scopeRE = regexp.MustCompile(`^[a-z][a-z0-9_-]*(:([a-z0-9_*-]+))?$`)
 
 // CreateTokenRequest is the JSON body of POST /api/v1/admin/tokens.
 type CreateTokenRequest struct {
@@ -46,6 +40,9 @@ type TokenSummary struct {
 	CreatedAt  string   `json:"created_at"`
 	LastUsedAt *string  `json:"last_used_at,omitempty"`
 	RevokedAt  *string  `json:"revoked_at,omitempty"`
+	// Source is "api" for minted tokens and "config" for tokens
+	// provisioned from server.yaml.
+	Source string `json:"source"`
 }
 
 // ListTokensResponse wraps the slice so we can add paging fields later
@@ -131,7 +128,7 @@ func handleListTokens(deps Deps) http.HandlerFunc {
 			return
 		}
 		rows, err := deps.DB.QueryContext(r.Context(), `
-			SELECT id, label, scopes_csv, created_at, last_used_at, revoked_at
+			SELECT id, label, scopes_csv, created_at, last_used_at, revoked_at, source
 			FROM tokens
 			ORDER BY id ASC
 		`)
@@ -148,8 +145,9 @@ func handleListTokens(deps Deps) http.HandlerFunc {
 				label               sql.NullString
 				csv, createdAt      string
 				lastUsed, revokedAt sql.NullString
+				source              string
 			)
-			if err := rows.Scan(&id, &label, &csv, &createdAt, &lastUsed, &revokedAt); err != nil {
+			if err := rows.Scan(&id, &label, &csv, &createdAt, &lastUsed, &revokedAt, &source); err != nil {
 				internalErr("scan token", err).write(w, r)
 				return
 			}
@@ -160,6 +158,7 @@ func handleListTokens(deps Deps) http.HandlerFunc {
 				CreatedAt:  createdAt,
 				LastUsedAt: nullToPtr(lastUsed),
 				RevokedAt:  nullToPtr(revokedAt),
+				Source:     source,
 			})
 		}
 		if err := rows.Err(); err != nil {
@@ -183,6 +182,23 @@ func handleRevokeToken(deps Deps) http.HandlerFunc {
 		if err != nil || id <= 0 {
 			writeError(w, r, http.StatusBadRequest,
 				CodeBadRequest, "invalid token id", "path id must be a positive integer")
+			return
+		}
+
+		var source string
+		err = deps.DB.QueryRowContext(r.Context(), `SELECT source FROM tokens WHERE id = ?`, id).Scan(&source)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			writeError(w, r, http.StatusNotFound,
+				CodeNotFound, fmt.Sprintf("token id %d not found", id), "")
+			return
+		case err != nil:
+			internalErr("look up token", err).write(w, r)
+			return
+		case source == auth.SourceConfig:
+			writeError(w, r, http.StatusConflict, CodeConflict,
+				fmt.Sprintf("token id %d is provisioned from server.yaml", id),
+				"remove it from tokens: in server.yaml and restart; the next start revokes it")
 			return
 		}
 
@@ -269,7 +285,7 @@ func decodeCreateTokenRequest(body io.Reader) (CreateTokenRequest, *httpError) {
 	for i, s := range req.Scopes {
 		s = strings.TrimSpace(s)
 		req.Scopes[i] = s
-		if !scopeRE.MatchString(s) {
+		if !auth.ValidScope(s) {
 			return CreateTokenRequest{}, &httpError{
 				status: http.StatusBadRequest,
 				code:   CodeBadRequest,
