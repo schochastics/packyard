@@ -69,6 +69,8 @@ func NewMux(deps Deps) http.Handler {
 	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}", handlePublish(deps))
 	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}/yank", handleYank(deps))
 	mux.HandleFunc("DELETE /api/v1/packages/{channel}/{name}/{version}", handleDelete(deps))
+	mux.HandleFunc("POST /api/v1/packages/{channel}/{name}/{version}/binaries/{cell}", handleAttachBinary(deps))
+	mux.HandleFunc("GET /api/v1/channels/{channel}/missing-binaries", handleListMissingBinaries(deps))
 
 	// Admin surface. All routes require the admin scope; tokens created
 	// here can grant arbitrary privileges including admin itself, so

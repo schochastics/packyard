@@ -376,6 +376,47 @@ components:
         overwritten:
           type: boolean
           description: true when replacing an existing row on a mutable channel.
+        missing_cells:
+          type: array
+          items: { type: string }
+          description: |
+            Matrix cells this version has no binary for after the publish.
+            CI builds these and attaches them with
+            POST /api/v1/packages/{channel}/{name}/{version}/binaries/{cell}.
+
+    AttachBinaryResponse:
+      type: object
+      required: [channel, name, version, cell, binary_sha256, size, already_existed, overwritten]
+      properties:
+        channel: { type: string }
+        name: { type: string }
+        version: { type: string }
+        cell: { type: string }
+        binary_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        size: { type: integer, format: int64 }
+        already_existed:
+          type: boolean
+          description: Identical bytes were already attached (HTTP 200).
+        overwritten:
+          type: boolean
+          description: Replaced a different binary on a mutable channel (HTTP 200).
+
+    MissingBinary:
+      type: object
+      required: [name, version, cell]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        cell: { type: string }
+
+    ListMissingBinariesResponse:
+      type: object
+      required: [channel, missing]
+      properties:
+        channel: { type: string }
+        missing:
+          type: array
+          items: { $ref: '#/components/schemas/MissingBinary' }
 
     # ---- Yank ----------------------------------------------------------
     YankRequest:
@@ -785,10 +826,11 @@ paths:
     post:
       summary: Yank a version
       description: |
-        Flags the version as yanked. The tarball stays reachable so in-
-        flight installs don't break; PACKAGES lists the row with
-        `Yanked: yes`. Works on every channel (including immutable).
-        Requires `yank:<channel>`.
+        Flags the version as yanked. It drops out of PACKAGES (the next-
+        highest version is listed instead) but stays downloadable and is
+        listed in Meta/archive.rds, so pinned lockfiles keep restoring.
+        Works on every channel (including immutable). Requires
+        `yank:<channel>`.
       operationId: yankPackage
       tags: [packages]
       parameters:
@@ -811,6 +853,84 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+  /api/v1/packages/{channel}/{name}/{version}/binaries/{cell}:
+    post:
+      summary: Attach a binary to a published version
+      description: |
+        Adds the binary for one matrix cell to an already published
+        version, e.g. after a failed build is retried or when a new R
+        version is added to matrix.yaml and existing packages are
+        backfilled. On immutable channels a missing cell may be added
+        but an existing cell's bytes may not change. Requires
+        `publish:<channel>`.
+      operationId: attachBinary
+      tags: [packages]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - $ref: '#/components/parameters/PackageNamePath'
+        - $ref: '#/components/parameters/VersionPath'
+        - name: cell
+          in: path
+          required: true
+          description: A cell name from matrix.yaml.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [binary]
+              properties:
+                binary:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Attached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachBinaryResponse' }
+        '200':
+          description: Already attached with identical bytes, or overwritten on a mutable channel.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttachBinaryResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+
+  /api/v1/channels/{channel}/missing-binaries:
+    get:
+      summary: List binaries CI still has to build
+      description: |
+        For the current version of every package on the channel (the one
+        PACKAGES serves), each matrix cell without a binary. Archived
+        versions are not listed. Requires `publish:<channel>` or `admin`.
+      operationId: listMissingBinaries
+      tags: [packages]
+      parameters:
+        - $ref: '#/components/parameters/ChannelPath'
+        - name: cell
+          in: query
+          required: false
+          description: Restrict to one cell.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The missing (package, version, cell) triples.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ListMissingBinariesResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   # ---- Events --------------------------------------------------------
   /api/v1/events:

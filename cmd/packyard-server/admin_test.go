@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gitea.cynkra.com/david.schoch/packyard/internal/api"
@@ -193,8 +194,21 @@ cells:
 	if err := adminImportBundle(&cfg, []string{"-channel", channelName, srcArchive}); err != nil {
 		t.Fatalf("source import: %v", err)
 	}
+	if out := captureStdout(t, func() error {
+		return adminMissingBinaries(&cfg, []string{"-channel", channelName})
+	}); !strings.Contains(out, "foo      1.0.0    r-4.4") || !strings.Contains(out, "1 missing") {
+		t.Errorf("missing-binaries after source import:\n%s", out)
+	}
 	if err := adminImportBundle(&cfg, []string{"-channel", channelName, binArchive}); err != nil {
 		t.Fatalf("binary import: %v", err)
+	}
+	if out := captureStdout(t, func() error {
+		return adminMissingBinaries(&cfg, []string{"-channel", channelName})
+	}); !strings.Contains(out, "0 missing") {
+		t.Errorf("missing-binaries after binary import:\n%s", out)
+	}
+	if err := adminMissingBinaries(&cfg, nil); err == nil {
+		t.Error("missing-binaries without -channel succeeded")
 	}
 
 	// Reopen DB and verify state.
@@ -451,4 +465,23 @@ func TestAdminGCReclaimsOrphan(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, liveSum[:2], liveSum[2:])); err != nil {
 		t.Errorf("live blob was removed: %v", err)
 	}
+}
+
+// captureStdout runs fn and returns what it printed to stdout.
+func captureStdout(t *testing.T, fn func() error) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	runErr := fn()
+	os.Stdout = orig
+	_ = w.Close()
+	out, _ := io.ReadAll(r)
+	if runErr != nil {
+		t.Fatalf("command failed: %v\n%s", runErr, out)
+	}
+	return string(out)
 }

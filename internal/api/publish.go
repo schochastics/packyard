@@ -70,6 +70,9 @@ type PublishResponse struct {
 	Binaries       []PublishedBinary `json:"binaries"`
 	AlreadyExisted bool              `json:"already_existed"`
 	Overwritten    bool              `json:"overwritten"`
+	// MissingCells lists the matrix cells this version has no binary
+	// for after the publish — what CI still needs to build and attach.
+	MissingCells []string `json:"missing_cells"`
 }
 
 // PublishedBinary is one row in PublishResponse.Binaries.
@@ -170,6 +173,13 @@ func handlePublish(deps Deps) http.HandlerFunc {
 			deps.Index.InvalidateChannel(channel)
 		}
 
+		missing, err := missingCellsFor(r.Context(), deps, channel, name, version)
+		if err != nil {
+			internalErr("missing cells", err).write(w, r)
+			return
+		}
+		resp.MissingCells = missing
+
 		recordPublishMetric(deps, channel, resp)
 		refreshCASBytes(r.Context(), deps)
 
@@ -179,6 +189,40 @@ func handlePublish(deps Deps) http.HandlerFunc {
 		}
 		writeJSON(w, r, status, resp)
 	}
+}
+
+// missingCellsFor returns the matrix cells without a binary for
+// (channel, name, version), in matrix order.
+func missingCellsFor(ctx context.Context, deps Deps, channel, name, version string) ([]string, error) {
+	out := []string{}
+	if deps.Matrix == nil {
+		return out, nil
+	}
+	rows, err := deps.DB.QueryContext(ctx, `
+		SELECT b.cell FROM binaries b JOIN packages p ON p.id = b.package_id
+		WHERE p.channel = ? AND p.name = ? AND p.version = ?
+	`, channel, name, version)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	have := map[string]bool{}
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		have[c] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, c := range deps.Matrix.Cells {
+		if !have[c.Name] {
+			out = append(out, c.Name)
+		}
+	}
+	return out, nil
 }
 
 // recordPublishMetric bumps packyard_publish_total with a result label

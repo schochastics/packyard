@@ -61,9 +61,47 @@ func adminMain(args []string) error {
 		return adminGC(cfg, rest[1:])
 	case "reindex":
 		return adminReindex(cfg, rest[1:])
+	case "missing-binaries":
+		return adminMissingBinaries(cfg, rest[1:])
 	default:
 		return adminUsageError("admin: unknown verb %q", rest[0])
 	}
+}
+
+// adminMissingBinaries lists, for the current version of every package
+// on a channel, the matrix cells that still have no binary — the
+// work list for a backfill after a new R version is added to
+// matrix.yaml. Same query as GET /api/v1/channels/{c}/missing-binaries.
+func adminMissingBinaries(cfg *config.ServerConfig, args []string) error {
+	fs := flag.NewFlagSet("admin missing-binaries", flag.ContinueOnError)
+	channel := fs.String("channel", "", "channel to inspect (required)")
+	cell := fs.String("cell", "", "restrict to one cell")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *channel == "" {
+		return adminUsageError("admin missing-binaries: -channel is required")
+	}
+	deps, cleanup, err := openAdminDeps(cfg)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	missing, err := api.MissingBinaries(context.Background(), deps, *channel, *cell)
+	if err != nil {
+		return err
+	}
+	tw := newTabWriter()
+	fmt.Fprintln(tw, "PACKAGE\tVERSION\tCELL")
+	for _, m := range missing {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", m.Name, m.Version, m.Cell)
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	fmt.Printf("\n%d missing\n", len(missing))
+	return nil
 }
 
 // adminReindex verifies that every sha256 referenced by the DB has a
@@ -726,6 +764,7 @@ verbs:
   channels list
   cells list
   cells show <cell-name>
+  missing-binaries -channel <name> [-cell <cell>]
   gc [-dry-run]
   reindex`
 

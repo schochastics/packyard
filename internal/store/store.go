@@ -71,7 +71,8 @@ type Result struct {
 
 // AttachInput describes a request to attach one binary to an existing
 // (channel, name, version) package row. Used by the bundle importer
-// when binary bundles are imported separately from the source bundle.
+// when binary bundles are imported separately from the source bundle,
+// by the proxy fetcher, and by the attach-binary API endpoint.
 type AttachInput struct {
 	Channel string
 	Name    string
@@ -80,7 +81,9 @@ type AttachInput struct {
 	Cell    string
 	Binary  BlobRef
 	Actor   string
-	Note    string // free-form, lands on the import_binary event row
+	Note    string // free-form, lands on the event row
+	// EventType names the event row; empty means "import_binary".
+	EventType string
 }
 
 // AttachResult mirrors Result for the binary-attach path. The source
@@ -333,14 +336,18 @@ func (s *Service) AttachBinary(ctx context.Context, in AttachInput) (*AttachResu
 	}
 
 	if !result.AlreadyExisted {
+		eventType := in.EventType
+		if eventType == "" {
+			eventType = "import_binary"
+		}
 		note := fmt.Sprintf("cell=%s sha256=%s", in.Cell, in.Binary.SHA256)
 		if in.Note != "" {
 			note = in.Note + " " + note
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO events(at, type, actor, channel, package, version, note)
-			VALUES (?, 'import_binary', ?, ?, ?, ?, ?)
-		`, now, nullIfEmpty(in.Actor), in.Channel, in.Name, in.Version, note); err != nil {
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`, now, eventType, nullIfEmpty(in.Actor), in.Channel, in.Name, in.Version, note); err != nil {
 			return nil, fmt.Errorf("append event: %w", err)
 		}
 	}
