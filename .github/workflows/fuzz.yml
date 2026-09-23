@@ -1,10 +1,22 @@
 name: Fuzz
 
+# Runs on pull requests that touch the publish parsers, weekly, and on
+# demand. Re-fuzzing unchanged code every night rarely finds anything.
+
 on:
+  pull_request:
+    paths:
+      - "internal/api/publish*.go"
+      - "internal/api/testdata/fuzz/**"
+      - ".github/workflows/fuzz.yml"
   schedule:
-    # Nightly at 05:17 UTC — off-peak, avoids the top-of-hour rush.
-    - cron: "17 5 * * *"
+    # Mondays 05:17 UTC.
+    - cron: "17 5 * * 1"
   workflow_dispatch: {}
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

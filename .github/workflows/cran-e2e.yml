@@ -6,13 +6,33 @@ name: CRAN e2e
 # scenarios live in tests/e2e/ and run anywhere Docker does
 # (`make e2e`); this workflow only calls that target.
 #
-# Nightly + manual only: the client images are large. The HTTP-level
-# protocol tests in internal/api/cran_protocol_test.go run on push.
+# The client images are large, so this runs only on pull requests that
+# touch the server, the publish/bundle scripts or the suite itself, plus
+# weekly to catch drift in R, renv, pak and remotes, and on demand
+# (run it before tagging a release). The HTTP-level protocol tests in
+# internal/api/cran_protocol_test.go run on every push.
 
 on:
+  pull_request:
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "Dockerfile"
+      - "Makefile"
+      - "examples/ci/**"
+      - "examples/bundler/**"
+      - "tests/e2e/**"
+      - ".github/workflows/cran-e2e.yml"
   schedule:
-    - cron: "37 5 * * *"
+    # Mondays 05:37 UTC.
+    - cron: "37 5 * * 1"
   workflow_dispatch: {}
+
+concurrency:
+  group: cran-e2e-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

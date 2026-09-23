@@ -118,14 +118,16 @@ behaviour. `ghcr.io/schochastics/packyard:1.2.0` works;
   `httptest.NewServer` and exercise the on-the-wire surface. Prefer
   them for anything that crosses handler / DB / CAS boundaries.
 - Fuzz targets for multipart publish live in
-  `internal/api/publish_fuzz_test.go`; `.github/workflows/fuzz.yml` runs them nightly.
+  `internal/api/publish_fuzz_test.go`; `.github/workflows/fuzz.yml` runs them on
+  PRs touching `publish*.go` and weekly.
 - `internal/metrics` has 0% coverage by design — it's definitions
   plus registrations, exercised transitively by `metrics_*_test.go`
   in `internal/api`.
 - CRAN-protocol compliance is HTTP/byte-level in
   [cran_protocol_test.go](internal/api/cran_protocol_test.go);
   real R clients run in `make e2e` ([tests/e2e/](tests/e2e/)), which
-  runs nightly in `.github/workflows/cran-e2e.yml`.
+  `.github/workflows/cran-e2e.yml` runs on path-filtered PRs, weekly,
+  and manually before a release.
 
 ## Memory vs this file
 

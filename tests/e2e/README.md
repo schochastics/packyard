@@ -1,8 +1,10 @@
 # End-to-end suite
 
 `make e2e` runs real R clients against a live packyard container.
-Docker is the only requirement. The nightly GitHub workflow
-(`.github/workflows/cran-e2e.yml`) just calls the target.
+Docker is the only requirement. The GitHub workflow
+(`.github/workflows/cran-e2e.yml`) just calls the target; it runs on
+pull requests that touch the server or scripts, weekly, and on demand
+(`gh workflow run cran-e2e.yml`, do this before tagging a release).
 
 ```sh
 make e2e                     # both jobs

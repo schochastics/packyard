@@ -209,13 +209,14 @@ CI runs on GitHub Actions ([.github/workflows/](.github/workflows/)):
 | [ci.yml](.github/workflows/ci.yml) | push to `main`, pull requests | `go mod tidy` check, vet, race tests, golangci-lint, OpenAPI lint, build |
 | [release.yml](.github/workflows/release.yml) | tag `v*` | GoReleaser: GitHub release (tarballs, checksums, SBOMs) and the multi-arch image `ghcr.io/schochastics/packyard:X.Y.Z` + `:latest` |
 | [post-release.yml](.github/workflows/post-release.yml) | after a release | pulls the new image, checks `-version` and `/health` |
-| [cran-e2e.yml](.github/workflows/cran-e2e.yml) | nightly, manual | `make e2e` for jammy and rhel9 |
-| [fuzz.yml](.github/workflows/fuzz.yml) | nightly, manual | 2 min of fuzzing per multipart publish target |
+| [cran-e2e.yml](.github/workflows/cran-e2e.yml) | PRs touching server/scripts/e2e, weekly, manual | `make e2e` for jammy and rhel9 |
+| [fuzz.yml](.github/workflows/fuzz.yml) | PRs touching the publish parsers, weekly, manual | 2 min of fuzzing per multipart publish target |
 
 ### Cutting a release
 
 ```sh
 make check
+gh workflow run cran-e2e.yml && gh run watch   # real R clients, ~15 min
 git tag -a v1.2.0 -m "packyard v1.2.0"
 git push origin v1.2.0
 gh run watch
