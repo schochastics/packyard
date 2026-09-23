@@ -60,7 +60,7 @@ echo "$ADMIN"
 
 ## From source
 
-Needs Go 1.22+ installed. Everything runs under a throwaway `./tmpdata/`
+Needs Go 1.25+ installed. Everything runs under a throwaway `./tmpdata/`
 dir so it won't collide with an existing packyard install.
 
 ### 1. Build and start packyard
@@ -116,8 +116,8 @@ PUB=$(curl -s -X POST http://localhost:8080/api/v1/admin/tokens \
 echo "$PUB"
 ```
 
-This is the token you'd drop into the [`examples/ci/publish.yml`](../examples/ci/publish.yml)
-workflow. `publish:*` lets it publish to any channel; narrow to
+This is the token you'd give CI (`PACKYARD_TOKEN` for the scripts in
+[examples/ci/](../examples/ci/)). `publish:*` lets it publish to any channel; narrow to
 `publish:dev` / `publish:prod` as your channel model demands.
 
 ## 4. Scaffold and publish a package
@@ -158,6 +158,12 @@ install.packages("mypkg")
 The default-channel alias serves `prod` at the root, so no channel segment
 needed. For non-default channels use `http://localhost:8080/dev/`.
 
+Once CI publishes binaries, point R at the binary URL for the server's
+distro instead (`distro` in `matrix.yaml`, `jammy` by default):
+`http://localhost:8080/prod/__linux__/jammy/latest`. Packages without
+a binary for the client's R version are served as source from there,
+too.
+
 ## See it in the dashboard
 
 Point a browser at `http://localhost:8080/ui/`, paste `$ADMIN` into the
@@ -181,9 +187,12 @@ Five endpoints, in this order:
    CRAN-protocol read.
 5. `GET /` from `/ui/` — operator dashboard.
 
-The real CI flow replaces step 4 with a multi-job workflow that builds
-per-cell binaries; see [examples/ci/README.md](../examples/ci/README.md).
-Everything else stays the same.
+The real CI flow replaces step 4 with
+[examples/ci/packyard-publish.sh](../examples/ci/packyard-publish.sh),
+which builds the source plus one binary per R version in `matrix.yaml`
+and publishes them in one request; see
+[examples/ci/README.md](../examples/ci/README.md). Everything else
+stays the same.
 
 ## Troubleshooting
 
@@ -203,8 +212,10 @@ Everything else stays the same.
   `docker rm -f packyard` (Docker) before retrying.
 - **No R on this machine** — `R CMD build` in step 4 needs an R
   install. If you're only smoke-testing the publish endpoint, swap the
-  scaffold step for any existing `.tar.gz`; the server takes arbitrary
-  bytes and doesn't parse R tarballs.
+  scaffold step for any existing `.tar.gz`. The server accepts it, but
+  it reads `DESCRIPTION` from the tarball for the dependency fields in
+  `PACKAGES`; without a real one, the entry only has `Package` and
+  `Version`, and the log shows a warning.
 - **`jq` not installed** — the `tok=$(... | jq -r .token)` step needs
   jq. Install it or grep the JSON manually.
 

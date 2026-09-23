@@ -23,9 +23,9 @@ prefix; additive changes happen in-place.
   CRAN-protocol reads (DCF text or `application/gzip`).
 - **Timestamps.** ISO-8601 with millisecond precision and `Z` suffix
   (`2026-04-22T15:04:05.123Z`).
-- **Pagination.** `limit` + `offset` for snapshot-style lists (channels,
-  packages, cells); `since_id` cursor for the events log. Both surface
-  an `X-Total-Count` header.
+- **Pagination.** `limit` + `offset` for `/api/v1/packages`, a
+  `since_id` cursor for `/api/v1/events`; both set an `X-Total-Count`
+  header. `/api/v1/channels` and `/api/v1/cells` return everything.
 - **IDs.** `request_id` on every error envelope, also logged to stderr;
   quote it when filing issues.
 
@@ -134,13 +134,15 @@ for minted tokens and `config` for tokens from `server.yaml` `tokens:`.
 #### `DELETE /api/v1/admin/tokens/{id}`
 
 Revokes the token. Config tokens are refused with 409 `conflict`:
-remove them from `server.yaml`, and the next start revokes them. Existing `/ui/` sessions using the revoked token
-become anonymous on the very next request (packyard does not cache
-identity — every request hits the tokens table).
+remove them from `server.yaml`, and the next start revokes them.
+
+Existing `/ui/` sessions using a revoked token become anonymous on
+the very next request (packyard does not cache identity — every
+request hits the tokens table).
 
 ### JSON read surface
 
-All admin-gated in v1. Loosening to scoped reads is a Phase C follow-up.
+All require the `admin` scope, except `/api/v1/cells`, which any valid token can read.
 
 #### `GET /api/v1/channels`
 
@@ -149,7 +151,7 @@ curl -s -H "Authorization: Bearer $ADMIN" \
   http://localhost:8080/api/v1/channels | jq
 ```
 
-Returns `{"channels":[{name, overwrite_policy, default, created_at, package_count, latest_publish_at}, …]}`.
+Returns `{"channels":[{name, overwrite_policy, default, kind, upstream_source_url, created_at, package_count, latest_publish_at}, …]}` (`upstream_source_url` only for proxy channels).
 
 #### `GET /api/v1/packages`
 
@@ -284,7 +286,7 @@ curl --fail-with-body -X POST \
   -d '{"reason":"security: CVE-xxxx-yyyy"}'
 ```
 
-Yank is reversible (a future endpoint will unyank); bytes stay in CAS.
+Yank keeps the bytes in CAS. There is no unyank endpoint yet.
 Required scope: `yank:<channel>`.
 
 Yanked versions disappear from `PACKAGES`: the index then serves the

@@ -68,6 +68,10 @@ The first install hits CRAN through packyard; the second time anyone
 on the team runs the same install, the tarball comes straight from
 packyard's local CAS.
 
+Proxy channels can't set `anonymous_reads`, so R has to send a
+`read:cran` token. See the header recipe in
+[examples/compose/README.md](../examples/compose/README.md#2-issue-readchannel-tokens-for-r-clients).
+
 ## Pinning a snapshot (PPM-style)
 
 Packyard doesn't have a separate `pin` field — operators encode the
@@ -162,13 +166,13 @@ upstream:
   there's no stale fallback for "this exact tarball" because the
   CAS is the cache.
 - **GC.** Proxied content lives in the same CAS as locally-published
-  content. `packyard admin gc` runs unchanged. There is no
+  content. `packyard-server admin gc` runs unchanged. There is no
   "expire cache" command — once a tarball is cached, it stays.
 - **Events.** `proxy_tarball_fetch`, `proxy_index_stale_served`, and
   the per-package `import_binary` events from `AttachBinary` all
   show up in `/ui/events` for audit.
-- **Metrics.** `packyard_proxy_fetch_total{channel, kind, result}`
-  counters track upstream activity. See `/metrics` for the live shape.
+- **Metrics.** `packyard_proxy_fetch_total{channel, kind, outcome}`
+  counters track upstream activity ([admin.md](admin.md#metrics)).
 
 ## Composing with the air-gap bundle path
 

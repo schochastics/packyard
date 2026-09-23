@@ -102,9 +102,11 @@ options(repos = c(INTERNAL = "https://packyard.corp/prod/__linux__/jammy/latest"
 options(repos = c(INTERNAL = "https://packyard.corp", getOption("repos")))
 ```
 
-`install.packages()` just works from there — packyard serves the CRAN
-protocol at `/<channel>/src/contrib/PACKAGES` and the default-channel
-alias at `/src/contrib/PACKAGES`.
+`install.packages()` works from there as long as the channel sets
+`anonymous_reads: true` (R sends no token; see
+[config.md](config.md)). Packyard serves the CRAN protocol at
+`/<channel>/src/contrib/…`, `/<channel>/__linux__/<distro>/latest/src/contrib/…`
+and, for the default channel, the same paths without `/<channel>`.
 
 ## From git (one repo at a time)
 
@@ -140,14 +142,14 @@ New (once `foo` has been imported at least once):
 install.packages("foo", repos = "https://packyard.corp/dev")
 ```
 
-You'll typically wrap the import + tag for release in the project's CI
-— see [examples/ci/publish.yml](../examples/ci/publish.yml) for the
-template. The git importer is for one-off backfills and quick
+Going forward, publish from the project's CI with the scripts in
+[examples/ci/](../examples/ci/) (`packyard-publish.sh`), which also
+build the binaries. The git importer is for one-off backfills and quick
 experiments, not a replacement for CI-driven publishes.
 
 ## Scripting larger migrations
 
-Both `admin import` commands work well inside a shell loop. For a
+The `admin import` commands work well inside a shell loop. For a
 dozen git repos:
 
 ```sh

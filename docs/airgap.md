@@ -2,8 +2,8 @@
 
 Operator-facing walkthrough for running packyard on a host with no
 internet egress and getting CRAN packages onto it via offline
-sync-bundles. As of v1.x both halves of the workflow ship: the
-bundle *producer* (an R script under `examples/bundler/`) and the
+sync-bundles. Both halves of the workflow ship: the bundle
+*producer* (an R script under `examples/bundler/`) and the
 *importer* (`packyard-server admin import bundle`).
 
 For the design rationale, see [design.md §10](../design.md). For
@@ -117,9 +117,10 @@ truth for channel policy, and an air-gap snapshot needs to be
 explicitly immutable.
 
 ```yaml
-# channels.yaml
-- name: cran-r4.4-2026q1
-  overwrite_policy: immutable
+# channels.yaml, under channels:
+  - name: cran-r4.4-2026q1
+    overwrite_policy: immutable
+    anonymous_reads: true   # R clients send no token; omit to require read:<channel>
 ```
 
 Restart the server (or re-run `packyard-server -init`) so the channel
@@ -148,23 +149,21 @@ from CAS.
 
 ### 6. Point R at the snapshot
 
-On client machines, configure R to read from the new channel:
+On client machines, configure R to read from the new channel. Use
+the `__linux__/<distro>/latest` URL, with `<distro>` from the
+server's `matrix.yaml`, so imported binaries are served to the
+matching R version. Every other R version gets source. The plain
+`/<channel>/` URL always serves source.
 
 ```r
 options(repos = c(
-  cran-r4.4-2026q1 = "http://packyard.internal/cran-r4.4-2026q1/",
-  packyard         = "http://packyard.internal/",
-  getOption("repos")
+  cran     = "http://packyard.internal/cran-r4.4-2026q1/__linux__/rhel9/latest",
+  internal = "http://packyard.internal/prod/__linux__/rhel9/latest"
 ))
 ```
 
-Or in `.Rprofile` for project pinning:
-
-```r
-options(repos = c(
-  cran = "http://packyard.internal/cran-r4.4-2026q1/"
-))
-```
+Put the same `options()` call in a project's `.Rprofile` to pin that
+project to the snapshot.
 
 Now `install.packages("ggplot2")` resolves to the curated bundle
 content, not to upstream CRAN. The pin holds forever — the
@@ -310,6 +309,7 @@ back to source for clients on cells that aren't built.
 | Air-gap operator playbook | This doc |
 | `admin import bundle` CLI | Shipped — see [admin.md](admin.md#admin-import-bundle-path-or-targz--channel-name) |
 | Binary bundle support | Shipped — one cell per bundle, P3M as the binary source |
-| Bundle-level signing enforcement | Deferred; manifest sha256 mandatory, ed25519 optional |
+| Bundle-level signing enforcement | Deferred; manifest sha256 mandatory, signing is an operator step |
 | Bioconductor support | Deferred; same format applies |
-| Diff bundles | Deferred; full bundles + CAS dedup is enough at v1.x scale |
+| Diff bundles | Deferred; full bundles + CAS dedup is enough at this scale |
+| Migrating an existing CRAN-like repo | [migration.md](migration.md#from-an-s3-hosted-or-any-cran-like-repository) (`s3-cranlike-to-bundle.R`) |

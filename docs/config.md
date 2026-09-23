@@ -16,11 +16,17 @@ optional and only needed once you outgrow the command-line flags.
   ui-session-key        # 32-byte HMAC key (auto-generated, 0600)
 ```
 
-The data dir is picked in this order:
+The data dir is:
 
-1. `-data <dir>` CLI flag (default `./data`).
-2. `data_dir` in `server.yaml` if `-config` is set.
-3. `WORKDIR /data` in the official Docker image, with `VOLUME /data`.
+1. `data_dir` from `server.yaml` when `-config` is set (`-data` is
+   then ignored);
+2. otherwise the `-data <dir>` flag (default `./data`, relative to the
+   working directory). The image's working directory is `/data`, so
+   always pass `-data /data` there; the default would resolve to
+   `/data/data`.
+
+`channels_file` / `matrix_file` in `server.yaml` move those two files
+out of the data dir, e.g. onto a read-only config mount.
 
 ## `server.yaml`
 
@@ -155,6 +161,8 @@ channels:
 | `name` | yes | `[a-z0-9]([a-z0-9-]*[a-z0-9])?`, max 63 chars. Appears in URLs and tokens, so keep it short. |
 | `overwrite_policy` | yes | `mutable` or `immutable` (see below). |
 | `default` | no | Bool. Exactly one channel must be `true` — that's the channel served at the `/src/contrib/…` alias. |
+| `kind` | no | `local` (default) or `proxy`. See [proxy.md](proxy.md) (frozen feature). |
+| `upstream` | proxy only | Upstream settings for `kind: proxy`; see [proxy.md](proxy.md#knobs). |
 | `anonymous_reads` | no | Bool, default `false`. When `true`, the channel's CRAN-protocol reads (`PACKAGES`, tarballs, `Archive/`, `Meta/archive.rds`) need no token. Everything else, including the JSON API, still does. Not allowed on proxy channels. |
 
 ### Overwrite policy
@@ -255,9 +263,14 @@ cells:
 After restarting:
 
 - Existing packages have no binary for the new cell; clients on R 4.7
-  get source until binaries are backfilled. `packyard-server admin
-  cells show r-4.7` prints the gap list.
-- Subsequent CI runs that include the cell fill the gap over time.
+  get source until binaries are backfilled.
+- `packyard-server admin missing-binaries -channel prod -cell r-4.7`
+  (or `GET /api/v1/channels/prod/missing-binaries?cell=r-4.7`) lists
+  the gap, and
+  [examples/ci/packyard-backfill.sh](../examples/ci/packyard-backfill.sh)
+  builds and attaches those binaries. Future publishes include the
+  cell automatically, because the CI scripts read the cell list from
+  the server.
 
 **Change the distro** (e.g. a client moves from `jammy` to `noble`):
 change `distro`, restart, and rebuild binaries for every cell. Clients
@@ -266,23 +279,23 @@ requests for any other distro return 404.
 
 ### Relationship to the CI workflow
 
-Every `cell.name` that a client publishes a binary for must exist in
-`matrix.yaml`. Cells referenced from a publish manifest but missing
-from matrix.yaml fail publish with 400 `bad_request`. The reference CI
-template at [examples/ci/publish.yml](../examples/ci/publish.yml)
-matrix block is what operators adapt; the server's matrix is the
-authoritative list.
+`matrix.yaml` is the authoritative list of what CI builds. The
+reference scripts in [examples/ci/](../examples/ci/) read it from
+`GET /api/v1/cells` and build one binary per cell, with the matching
+R under `/opt/R/<version>`. A binary for a cell missing from
+`matrix.yaml` is rejected with 400 `bad_request`. A publish may omit
+cells; the response lists them in `missing_cells`.
 
 ## Environment variables
 
-Packyard reads no environment variables for runtime config in v1 —
+Packyard reads no environment variables for runtime config;
 everything comes from YAML + CLI flags. The Docker image sets
 `WORKDIR /data` and `VOLUME /data`; that's it.
 
 ## Changing config
 
-Every config file is re-read at server start. There is no hot-reload
-in v1 — SIGHUP is ignored. The reconcile logic is deliberately
+Every config file, including token secret files, is re-read at server
+start. There is no hot-reload; SIGHUP is ignored. The reconcile logic is deliberately
 simple: channels added, same channels are updated in place (policy or
 default-flag changes apply), channels removed from YAML are NOT
 removed from the DB. Start with a known-good YAML, restart once,

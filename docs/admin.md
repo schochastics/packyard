@@ -187,8 +187,9 @@ r-4.5  4.5  38        38/42     498 MiB
 
 ### `admin cells show <cell-name>`
 
-The matrix entry, followed by every live package that does NOT have a
-binary for that cell. Targets the "added a new cell, which packages
+The matrix entry, followed by every non-yanked package version that
+has no binary for that cell. `admin missing-binaries` narrows this to
+the current version of each package. Targets the "added a new cell, which packages
 still need to build?" workflow.
 
 ```sh
@@ -248,9 +249,11 @@ write — still not desirable).
 ### `admin reindex`
 
 Verifies that every sha256 the DB references has a matching blob in
-CAS. Packyard doesn't persist a `PACKAGES` index — the file is rebuilt
-from the DB on every request and cached in memory for 5 minutes — so
-this is the actual recovery op after a DB or CAS restore.
+CAS, and fills in DESCRIPTION metadata (the dependency fields in
+`PACKAGES`, a binary's `Built:`) for rows that lack it. The server does
+the same metadata backfill once at startup. Packyard doesn't persist
+a `PACKAGES` index: it is built from the DB on request and cached in
+memory, so this is the actual recovery op after a DB or CAS restore.
 
 ```sh
 packyard-server admin -data ./data reindex
@@ -350,12 +353,13 @@ packyard-owned metrics appear (no Go stdlib metrics leaking through).
 |---|---|---|
 | `packyard_http_requests_total` | `method`, `status` | Request counter at the HTTP layer. URL path is intentionally not a label — cardinality discipline. |
 | `packyard_http_request_duration_seconds` | `method`, `status` | Histogram, buckets `[5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s, 30s]`. |
-| `packyard_publish_total` | `channel`, `result` | `result` is `created` / `overwrote` / `already_existed`. |
+| `packyard_publish_total` | `channel`, `result` | Publishes: `created` / `overwrote` / `already_existed`. Binary attaches: `binary_attached` / `binary_overwrote` / `binary_already_existed`. |
 | `packyard_yank_total` | `channel` | Counter. |
 | `packyard_delete_total` | `channel` | Counter. |
 | `packyard_cas_bytes` | — | Gauge of `SUM(source_size) + SUM(size)` across the DB. Logical, not physical — use `du -sh <data>/cas` for on-disk. |
-| `packyard_token_create_total` | — | Token mints (both CLI and HTTP). |
-| `packyard_token_revoke_total` | — | Token revokes. |
+| `packyard_proxy_fetch_total` | `channel`, `kind`, `outcome` | Proxy-channel upstream fetches. `kind` is `source` / `binary` / `index`; `outcome` is `ok` / `upstream_error` / `stale` (served a cached index after an upstream failure). |
+| `packyard_token_create_total` | — | Token mints through the HTTP endpoint. `-mint-token` runs in its own process and isn't counted. |
+| `packyard_token_revoke_total` | — | Token revokes through the HTTP endpoint. |
 
 ### Access log
 
