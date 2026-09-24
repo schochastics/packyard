@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/schochastics/packyard/internal/auth"
@@ -45,8 +46,9 @@ func authMiddleware(deps Deps) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 			default:
 				// A DB error during lookup is operator-observable but
-				// shouldn't leak into an auth-failure response. Mark
-				// the request unauthenticated and let handlers decide.
+				// shouldn't leak into an auth-failure response. Log it,
+				// mark the request unauthenticated and let handlers decide.
+				slog.Warn("auth: token lookup failed", "err", err)
 				next.ServeHTTP(w, r)
 			}
 		})
