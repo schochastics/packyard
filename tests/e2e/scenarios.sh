@@ -28,7 +28,8 @@ for v in 0.1.0 0.2.0 0.3.0; do
   (cd "$WORK/testpkg-$v" &&
     PACKYARD_CHANNELS=prod PACKYARD_R_ROOT="$WORK/r44" bash /ci/packyard-publish.sh)
 done
-curl -fsS -X POST -H "Authorization: Bearer $PACKYARD_TOKEN" \
+# Header via process substitution, not argv: see api() in packyard-ci-lib.sh.
+curl -fsS -X POST -H @<(printf 'Authorization: Bearer %s\n' "$PACKYARD_TOKEN") \
   -H 'Content-Type: application/json' -d '{"reason":"e2e: yanked newest"}' \
   "$PACKYARD_SERVER/api/v1/packages/prod/testpkg/0.3.0/yank" >/dev/null
 

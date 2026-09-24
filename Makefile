@@ -3,7 +3,9 @@
 BIN          := packyard-server
 CMD_DIR      := ./cmd/packyard-server
 VERSION_PKG  := github.com/schochastics/packyard/internal/version
-VERSION      := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Leading "v" stripped so local builds report the same "1.2.3" GoReleaser
+# injects via {{ .Version }}.
+VERSION      := $(patsubst v%,%,$(shell git describe --tags --always --dirty 2>/dev/null || echo dev))
 LDFLAGS      := -s -w -X $(VERSION_PKG).Version=$(VERSION)
 
 all: check build ## Run checks and build binary

@@ -84,7 +84,8 @@ gh run watch    # ~2.5 min
 behaviour. `ghcr.io/schochastics/packyard:1.2.0` works;
 `:v1.2.0` returns `manifest unknown`.
 
-`:latest` is updated on every tag.
+`:latest` is updated on every non-prerelease tag (`v1.3.0-rc.1` skips
+it), and the release job only runs after `go test -race ./...` passes.
 
 ## Repo gotchas worth memorising
 
@@ -120,7 +121,8 @@ behaviour. `ghcr.io/schochastics/packyard:1.2.0` works;
   them for anything that crosses handler / DB / CAS boundaries.
 - Fuzz targets for multipart publish live in
   `internal/api/publish_fuzz_test.go`; `.github/workflows/fuzz.yml` runs them on
-  PRs touching `publish*.go` and weekly.
+  PRs touching `publish*.go`, `internal/store`, `internal/cas` or
+  `internal/rpkg`, and weekly.
 - `internal/metrics` has 0% coverage by design — it's definitions
   plus registrations, exercised transitively by `metrics_*_test.go`
   in `internal/api`.

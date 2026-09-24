@@ -31,7 +31,12 @@ set -euo pipefail
 
 PKG=$(awk -F': *' '/^Package:/ {print $2}' DESCRIPTION)
 VER=$(awk -F': *' '/^Version:/ {print $2}' DESCRIPTION)
-CELLS_JSON=$(api "$SERVER/api/v1/cells")
+# api failures are caught explicitly: under set -e a bare RESP=$(api …)
+# would exit before the server's error body (message + hint) is shown.
+if ! CELLS_JSON=$(api "$SERVER/api/v1/cells"); then
+  { echo "fetching $SERVER/api/v1/cells failed:"; printf '%s\n' "$CELLS_JSON"; } >&2
+  exit 1
+fi
 DEFAULT_MINOR=$(jq -r .default_r_minor <<<"$CELLS_JSON")
 echo "==> $PKG $VER; server serves $(jq -r .distro <<<"$CELLS_JSON"), R $(jq -r '[.cells[].r_minor] | join(", ")' <<<"$CELLS_JSON")"
 
@@ -68,8 +73,11 @@ echo "$MANIFEST" >"$WORK/manifest.json"
 # ---- publish -----------------------------------------------------------
 for CHANNEL in $PACKYARD_CHANNELS; do
   echo "==> publishing to $CHANNEL"
-  RESP=$(api -X POST -F "manifest=@$WORK/manifest.json;type=application/json" "${FILES[@]}" \
-    "$SERVER/api/v1/packages/$CHANNEL/$PKG/$VER")
+  if ! RESP=$(api -X POST -F "manifest=@$WORK/manifest.json;type=application/json" "${FILES[@]}" \
+    "$SERVER/api/v1/packages/$CHANNEL/$PKG/$VER"); then
+    { echo "publish of $PKG $VER to $CHANNEL failed:"; printf '%s\n' "$RESP"; } >&2
+    exit 1
+  fi
   jq -r '"    \(if .already_existed then "unchanged" elif .overwritten then "overwritten" else "created" end); missing cells: \(.missing_cells | if length == 0 then "none" else join(", ") end)"' <<<"$RESP"
 done
 
