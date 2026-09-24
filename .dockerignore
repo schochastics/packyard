@@ -27,3 +27,10 @@ implementation.md
 .golangci.yaml
 .goreleaser.yaml
 Makefile
+
+# Local secrets and scratch (never belong in a build context)
+.admin
+.admin.cache
+.env*
+docs/internal.md
+tests/e2e/out

@@ -99,7 +99,11 @@ docker_manifests:
     image_templates:
       - "ghcr.io/schochastics/packyard:{{ .Version }}-amd64"
       - "ghcr.io/schochastics/packyard:{{ .Version }}-arm64"
+  # Prerelease tags (v1.3.0-rc.1) publish their own version tag but must
+  # not repoint :latest. skip_push: auto skips when the tag has a
+  # prerelease suffix.
   - name_template: "ghcr.io/schochastics/packyard:latest"
+    skip_push: auto
     image_templates:
       - "ghcr.io/schochastics/packyard:{{ .Version }}-amd64"
       - "ghcr.io/schochastics/packyard:{{ .Version }}-arm64"
@@ -136,4 +140,4 @@ release:
   footer: |
     ---
 
-    See [implementation.md](implementation.md) for what's shipped in each phase.
+    See [implementation.md](https://github.com/schochastics/packyard/blob/main/implementation.md) for what's shipped in each phase.

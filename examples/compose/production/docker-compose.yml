@@ -7,7 +7,10 @@ services:
     image: ${PACKYARD_IMAGE:-ghcr.io/schochastics/packyard:latest}
     command: ["-config", "/etc/packyard/server.yaml"]
     ports:
-      - "8080:8080"          # put the TLS-terminating reverse proxy in front
+      # Loopback only: the listener is plain HTTP, so only the TLS-terminating
+      # reverse proxy on this host should reach it. If the proxy runs in
+      # this compose project instead, drop `ports:` and use `expose: ["8080"]`.
+      - "127.0.0.1:8080:8080"
     expose:
       - "9090"               # metrics_listen: reachable on the compose network only
     volumes:

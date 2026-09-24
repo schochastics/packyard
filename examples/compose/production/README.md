@@ -24,7 +24,9 @@ docker run --rm ghcr.io/schochastics/packyard:latest admin token-gen | head -n1 
 docker run --rm ghcr.io/schochastics/packyard:latest admin token-gen > admin.txt
 sed -n 2p admin.txt > secrets/admin.sha256
 sed -n 1p admin.txt   # store this in your password manager, then: rm admin.txt
-chmod 644 secrets/*   # readable by the container's uid 65532
+# Owned by the container's nonroot uid 65532 and readable only by it,
+# so the plaintext CI token is not world-readable on the host.
+sudo chown 65532:65532 secrets/* && sudo chmod 0400 secrets/*
 
 docker compose up -d
 docker compose ps     # STATUS shows (healthy)

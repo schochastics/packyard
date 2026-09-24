@@ -287,7 +287,9 @@ write_manifest_source <- function(args, included) {
     tool         = sprintf("examples/bundler/build-bundle.R (miniCRAN %s, R %s)",
                            packageVersion("miniCRAN"),
                            paste(R.version$major, R.version$minor, sep = ".")),
-    input_packages = if (args$full) NULL else read_packages(args$packages_file),
+    # as.list(): to_json writes unnamed lists as arrays, so a single
+    # package still serializes as ["pkg"], not "pkg".
+    input_packages = if (args$full) NULL else as.list(read_packages(args$packages_file)),
     packages     = rows
   )
 
@@ -327,7 +329,7 @@ write_manifest_binary <- function(args, included) {
     tool         = sprintf("examples/bundler/build-bundle.R (miniCRAN %s, R %s)",
                            packageVersion("miniCRAN"),
                            paste(R.version$major, R.version$minor, sep = ".")),
-    input_packages = read_packages(args$packages_file),
+    input_packages = as.list(read_packages(args$packages_file)),
     packages     = rows
   )
 
@@ -352,11 +354,14 @@ compute_sha256 <- function(path) {
   stop("no SHA-256 implementation available; install 'openssl' or 'digest'", call. = FALSE)
 }
 
-# Tiny JSON serialiser so we don't pull jsonlite. Handles lists, named
-# lists, atomic vectors of length-1, and character/numeric/logical.
+# Tiny JSON serialiser so we don't pull jsonlite. Named lists become
+# objects, unnamed lists become arrays whatever their length, and
+# length-1 atomic vectors become scalars. Wrap a vector in as.list()
+# when the field must be an array even with one element.
 to_json <- function(x, indent = 0) {
   pad <- strrep("  ", indent)
   if (is.null(x)) return("null")
+  if (length(x) == 0) return("[]")
   if (is.logical(x) && length(x) == 1) return(if (x) "true" else "false")
   if (is.numeric(x) && length(x) == 1) return(format(x, scientific = FALSE))
   if (is.character(x) && length(x) == 1) return(json_string(x))
