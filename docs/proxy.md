@@ -111,6 +111,11 @@ the cell is picked from their User-Agent like on local channels:
       r-4.5: https://packagemanager.posit.co/cran/__linux__/jammy/latest
 ```
 
+Binary requests to upstream carry an R User-Agent for the cell (for
+example `R (4.4.0 x86_64-pc-linux-gnu x86_64 linux-gnu)`), which is how
+Posit Package Manager decides between a binary and a source tarball,
+so one PPM URL can serve several cells as above.
+
 The cell name on the left **must** appear in `matrix.yaml`. On
 startup packyard validates the cross-config and refuses to start if
 a `binary_urls` cell isn't declared. Cells missing from the map fall
@@ -161,8 +166,9 @@ upstream:
   channel for it.
 - **Stale-while-error.** If the upstream `PACKAGES` fetch fails and
   packyard has a cached body (from any prior fetch, even expired),
-  it serves the stale body and writes a `proxy_index_stale_served`
-  event row. Tarball misses on upstream-down return `502/504` —
+  it serves the stale body and writes one `proxy_index_stale_served`
+  event row per outage. Upstream is retried at most every 30 seconds
+  meanwhile, so a hanging upstream doesn't stall every request. Tarball misses on upstream-down return `502/504` —
   there's no stale fallback for "this exact tarball" because the
   CAS is the cache.
 - **GC.** Proxied content lives in the same CAS as locally-published
@@ -173,6 +179,15 @@ upstream:
   show up in `/ui/events` for audit.
 - **Metrics.** `packyard_proxy_fetch_total{channel, kind, outcome}`
   counters track upstream activity ([admin.md](admin.md#metrics)).
+
+- **Archived versions.** A version that is no longer current upstream
+  is fetched from `src/contrib/Archive/<pkg>/`, as on CRAN, so pinned
+  installs (`renv::restore()`, `remotes::install_version()`) work once
+  the file is requested by its name. `Meta/archive.rds` is not served
+  for proxy channels.
+- **Credentials.** An upstream URL may carry `user:token@` userinfo
+  (sent as basic auth). It is stripped from logs, event rows and error
+  responses.
 
 ## Composing with the air-gap bundle path
 

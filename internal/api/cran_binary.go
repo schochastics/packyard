@@ -10,7 +10,6 @@ import (
 
 	"github.com/schochastics/packyard/internal/config"
 	"github.com/schochastics/packyard/internal/store"
-	"github.com/schochastics/packyard/internal/upstream"
 )
 
 // Linux binaries are served the way Posit Package Manager serves
@@ -107,7 +106,7 @@ func serveLinuxPackages(w http.ResponseWriter, r *http.Request, deps Deps, chann
 		return
 	}
 	meta := lookupChannelMeta(r.Context(), deps, channel)
-	body, stale, err := deps.Index.GetLinux(r.Context(), channel, cell, deps.Matrix.Arch, meta, deps.Upstream)
+	body, read, err := deps.Index.GetLinux(r.Context(), channel, cell, deps.Matrix.Arch, meta, deps.Upstream)
 	if err != nil {
 		if meta.IsProxy() {
 			writeError(w, r, http.StatusServiceUnavailable, CodeUnavailable,
@@ -117,7 +116,7 @@ func serveLinuxPackages(w http.ResponseWriter, r *http.Request, deps Deps, chann
 		internalErr("build packages", err).write(w, r)
 		return
 	}
-	noteProxyIndexRead(r.Context(), deps, channel, meta, stale)
+	noteProxyIndexRead(r.Context(), deps, channel, meta, read)
 	writeIndexBody(w, r, body, gzipped)
 }
 
@@ -201,27 +200,16 @@ func proxyFetchBinaryTarball(ctx context.Context, deps Deps, meta *channelMeta, 
 		}
 	}
 
-	filename := fmt.Sprintf("%s_%s.tar.gz", name, version)
-	blob, err := deps.Upstream.FetchTarball(ctx, binBase, filename,
-		meta.Upstream.TarballMaxSize, meta.Upstream.Timeout)
-	if err != nil {
-		if upstream.NotFound(err) {
-			return &httpError{
-				status: http.StatusNotFound,
-				code:   CodeNotFound,
-				msg:    fmt.Sprintf("%s@%s binary not available upstream for cell %s on channel %s", name, version, cell, meta.Name),
-			}
-		}
-		if deps.Metrics != nil {
-			deps.Metrics.ProxyFetchTotal.WithLabelValues(meta.Name, "binary", "upstream_error").Inc()
-		}
-		return &httpError{
-			status: http.StatusBadGateway,
-			code:   CodeUnavailable,
-			msg:    "upstream binary tarball fetch failed",
-			hint:   err.Error(),
-		}
+	c := deps.Matrix.Lookup(cell)
+	if c == nil {
+		return &httpError{status: http.StatusNotFound, code: CodeNotFound,
+			msg: fmt.Sprintf("cell %s is not declared in matrix.yaml", cell)}
 	}
+	blob, herr := proxyFetchTarball(ctx, deps, meta, "binary", binBase, rUserAgent(c, deps.Matrix.Arch), name, version)
+	if herr != nil {
+		return herr
+	}
+	upstreamName := redactURL(binBase)
 	if _, err := deps.Store.AttachBinary(ctx, store.AttachInput{
 		Channel: meta.Name,
 		Name:    name,
@@ -229,20 +217,14 @@ func proxyFetchBinaryTarball(ctx context.Context, deps Deps, meta *channelMeta, 
 		Policy:  meta.Policy,
 		Cell:    cell,
 		Binary:  blob,
-		Actor:   "proxy:" + binBase,
+		Actor:   "proxy:" + upstreamName,
 	}); err != nil {
 		return internalErr("attach proxy binary", err)
-	}
-	if deps.Metrics != nil {
-		deps.Metrics.ProxyFetchTotal.WithLabelValues(meta.Name, "binary", "ok").Inc()
 	}
 	_, _ = deps.DB.ExecContext(ctx, `
 		INSERT INTO events(type, channel, package, version, note)
 		VALUES ('proxy_tarball_fetch', ?, ?, ?, ?)
-	`, meta.Name, name, version, fmt.Sprintf("cell=%s upstream=%s", cell, binBase))
-	if deps.Index != nil {
-		deps.Index.InvalidateChannel(meta.Name)
-	}
+	`, meta.Name, name, version, fmt.Sprintf("cell=%s upstream=%s", cell, upstreamName))
 	return nil
 }
 

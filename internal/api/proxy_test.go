@@ -368,5 +368,117 @@ func TestProxyChannelStaleWhileError(t *testing.T) {
 	}
 }
 
+// A version that is no longer current upstream lives under
+// src/contrib/Archive/<pkg>/ on CRAN; the proxy falls back to it.
+func TestProxyChannelFetchesArchivedVersion(t *testing.T) {
+	t.Parallel()
+	f := newProxyFixture(t)
+	f.upMux.HandleFunc("/src/contrib/Archive/praise/praise_0.9.tar.gz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "archived praise")
+	})
+	resp := f.authedGet(t, "/cran/src/contrib/Archive/praise/praise_0.9.tar.gz")
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "archived praise" {
+		t.Fatalf("status = %d body = %q", resp.StatusCode, body)
+	}
+}
+
+// Binary fetches carry an R User-Agent for the cell: upstreams such as
+// Posit Package Manager otherwise answer with the source tarball.
+func TestProxyChannelBinaryFetchSendsRUserAgent(t *testing.T) {
+	t.Parallel()
+	f := newProxyFixture(t)
+	f.upMux.HandleFunc("/src/contrib/praise_1.0.0.tar.gz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "source")
+	})
+	var binUA atomic.Value
+	f.upMux.HandleFunc("/__linux__/jammy/src/contrib/praise_1.0.0.tar.gz", func(w http.ResponseWriter, r *http.Request) {
+		binUA.Store(r.UserAgent())
+		_, _ = io.WriteString(w, "binary")
+	})
+	resp := f.authedGetUA(t, "/cran/__linux__/jammy/latest/src/contrib/praise_1.0.0.tar.gz",
+		"R (4.4.1 x86_64-pc-linux-gnu x86_64 linux-gnu)")
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "binary" {
+		t.Fatalf("status = %d body = %q", resp.StatusCode, body)
+	}
+	if ua, _ := binUA.Load().(string); !strings.HasPrefix(ua, "R (4.4.0 x86_64-pc-linux-gnu") {
+		t.Errorf("upstream saw User-Agent %q", ua)
+	}
+}
+
+// Fetching a tarball must not drop the cached upstream PACKAGES.
+func TestProxyTarballFetchKeepsIndexCache(t *testing.T) {
+	t.Parallel()
+	f := newProxyFixture(t)
+	var indexHits atomic.Int32
+	f.upMux.HandleFunc("/src/contrib/PACKAGES", func(w http.ResponseWriter, _ *http.Request) {
+		indexHits.Add(1)
+		_, _ = io.WriteString(w, "Package: praise\nVersion: 1.0.0\n\n")
+	})
+	f.upMux.HandleFunc("/src/contrib/praise_1.0.0.tar.gz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "source")
+	})
+	for _, p := range []string{"/cran/src/contrib/PACKAGES", "/cran/src/contrib/praise_1.0.0.tar.gz", "/cran/src/contrib/PACKAGES"} {
+		resp := f.authedGet(t, p)
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d", p, resp.StatusCode)
+		}
+	}
+	if n := indexHits.Load(); n != 1 {
+		t.Errorf("upstream PACKAGES fetched %d times, want 1", n)
+	}
+}
+
+// During an outage the stale index is served without retrying upstream
+// on every request, and the audit event is written once.
+func TestProxyStaleIndexBacksOff(t *testing.T) {
+	t.Parallel()
+	f := newProxyFixture(t)
+	var fail atomic.Bool
+	var indexHits atomic.Int32
+	f.upMux.HandleFunc("/src/contrib/PACKAGES", func(w http.ResponseWriter, _ *http.Request) {
+		indexHits.Add(1)
+		if fail.Load() {
+			http.Error(w, "down", http.StatusBadGateway)
+			return
+		}
+		_, _ = io.WriteString(w, "Package: praise\nVersion: 1.0.0\n\n")
+	})
+	get := func() {
+		resp := f.authedGet(t, "/cran/src/contrib/PACKAGES")
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d", resp.StatusCode)
+		}
+	}
+	get()
+	idx := f.deps.Index
+	idx.mu.Lock()
+	for k, e := range idx.entries {
+		e.expires = time.Now().Add(-time.Second)
+		idx.entries[k] = e
+	}
+	idx.mu.Unlock()
+	fail.Store(true)
+	for range 5 {
+		get()
+	}
+	if n := indexHits.Load(); n != 2 {
+		t.Errorf("upstream hit %d times, want 2 (warm-up + one failed refresh)", n)
+	}
+	var events int
+	_ = f.deps.DB.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM events WHERE type='proxy_index_stale_served'`).Scan(&events)
+	if events != 1 {
+		t.Errorf("stale events = %d, want 1", events)
+	}
+}
+
 // fmt import is used by some helpers above; ensure it stays in.
 var _ = fmt.Sprintf
