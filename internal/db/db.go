@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -45,7 +46,7 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	// upgrade from DEFERRED and dropping into SQLITE_BUSY_DEADLOCK,
 	// which busy_timeout alone cannot recover from.
 	q.Add("_txlock", "immediate")
-	dsn := "file:" + path + "?" + q.Encode()
+	dsn := FileURI(path, q.Encode())
 
 	sqlDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -65,4 +66,19 @@ func Open(ctx context.Context, path string) (*DB, error) {
 	}
 
 	return &DB{DB: sqlDB}, nil
+}
+
+// uriPathEscaper escapes the characters that end or alter the path in
+// an SQLite URI filename. Without it a data dir containing "#" or "?"
+// silently opens a different file: everything after "#" is a fragment.
+var uriPathEscaper = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
+
+// FileURI returns an SQLite "file:" URI for path with the given query
+// (already encoded, may be empty).
+func FileURI(path, query string) string {
+	uri := "file:" + uriPathEscaper.Replace(path)
+	if query != "" {
+		uri += "?" + query
+	}
+	return uri
 }

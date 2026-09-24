@@ -3,6 +3,7 @@ package db_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
@@ -262,5 +263,31 @@ func TestMigrateConcurrentOpenersBothSucceed(t *testing.T) {
 		if err := <-errs; err != nil {
 			t.Errorf("concurrent migrate: %v", err)
 		}
+	}
+}
+
+// A path with URI metacharacters must open exactly that file.
+func TestOpenPathWithURIMetacharacters(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "a#b?c%d")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "packyard.sqlite")
+	database, err := db.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = database.Close() }()
+	if _, err := database.ExecContext(ctx, `CREATE TABLE t (x INTEGER)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("database not created at %s: %v", path, err)
+	}
+	var mode string
+	if err := database.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
+		t.Errorf("pragmas not applied: journal_mode = %q, %v", mode, err)
 	}
 }
