@@ -27,7 +27,7 @@ type Deps struct {
 	Metrics         *metrics.Metrics  // optional; NewMux fills in if nil
 	Store           *store.Service    // optional; NewMux fills in if nil
 	Upstream        *upstream.Fetcher // optional; NewMux fills in if nil (proxy channels need it)
-	UISessionKey    []byte            // HMAC key for /ui/ session cookies; empty disables the UI
+	EnableUI        bool              // mount the /ui/ dashboard
 	UISecureCookies bool              // mark /ui/ cookies Secure (production)
 	PublicURL       string            // external base URL (server.yaml public_url); UI snippets
 	TrustedProxies  []netip.Prefix    // peers whose X-Forwarded-For is believed
@@ -122,21 +122,18 @@ func NewMux(deps Deps) http.Handler {
 	}
 
 	// Operator dashboard. Mounted under /ui/ so an operator can point a
-	// browser at the same host that serves the API. Disabled when no
-	// session key was supplied — keeps tests and CLI-only deployments
-	// from having to generate a key they won't use.
-	if len(deps.UISessionKey) > 0 {
+	// browser at the same host that serves the API. Off unless
+	// EnableUI is set, which keeps API tests free of it.
+	if deps.EnableUI {
 		uiHandler, err := ui.NewHandler(ui.Deps{
 			DB:            deps.DB,
 			Matrix:        deps.Matrix,
-			SessionKey:    deps.UISessionKey,
 			SecureCookies: deps.UISecureCookies,
 			PublicURL:     deps.PublicURL,
 		})
 		if err != nil {
-			// Unreachable in practice: only SessionKey emptiness and
-			// template-parse bugs fail here, and we've just gated on the
-			// former. Log loudly and keep serving the API anyway.
+			// Unreachable in practice: only a nil DB and template-parse
+			// bugs fail here. Log loudly and keep serving the API anyway.
 			slog.Default().Error("ui: handler init failed; /ui/ disabled", "err", err)
 		} else {
 			// Each UI route registered explicitly rather than as a

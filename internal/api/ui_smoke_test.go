@@ -14,7 +14,7 @@ import (
 // mux rejects (StripPrefix miscount, route conflict, auth gate leak).
 func TestUIMountSmoke(t *testing.T) {
 	deps := newAuthTestDeps(t)
-	deps.UISessionKey = []byte("smoke-test-key-32-bytes-padded!!")
+	deps.EnableUI = true
 	tok := seedTokenRow(t, deps.DB.DB, "smoke", "admin", false)
 
 	srv := httptest.NewServer(NewMux(deps))
@@ -83,19 +83,19 @@ func TestUIMountSmoke(t *testing.T) {
 	}
 }
 
-// TestUIDisabledWhenNoSessionKey verifies /ui/ returns 404 when the
+// TestUIDisabledByDefault verifies /ui/ returns 404 when the
 // operator hasn't opted into the UI. Keeps the blast radius small for
 // CLI-only deployments that don't want an HTML surface at all.
-func TestUIDisabledWhenNoSessionKey(t *testing.T) {
+func TestUIDisabledByDefault(t *testing.T) {
 	deps := newAuthTestDeps(t)
-	// deliberately leave UISessionKey empty
+	// deliberately leave EnableUI unset
 
 	srv := httptest.NewServer(NewMux(deps))
 	t.Cleanup(srv.Close)
 
 	res := doReq(t, srv, newCookieJar(), "GET", "/ui/", nil)
 	if res.StatusCode != http.StatusNotFound {
-		t.Errorf("GET /ui/ with no UISessionKey status = %d; want 404", res.StatusCode)
+		t.Errorf("GET /ui/ with EnableUI unset status = %d; want 404", res.StatusCode)
 	}
 }
 

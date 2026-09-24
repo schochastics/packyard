@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/schochastics/packyard/internal/auth"
 	"github.com/schochastics/packyard/internal/config"
@@ -30,10 +31,7 @@ func newTestHandler(t *testing.T) (*Handler, *db.DB) {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	h, err := NewHandler(Deps{
-		DB:         database,
-		SessionKey: []byte("test-key-at-least-32-bytes-long!"),
-	})
+	h, err := NewHandler(Deps{DB: database})
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -73,10 +71,9 @@ func sessionCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
 	return nil
 }
 
-func TestNewHandlerRequiresSessionKey(t *testing.T) {
-	_, err := NewHandler(Deps{})
-	if err == nil {
-		t.Fatalf("expected error for empty SessionKey")
+func TestNewHandlerRequiresDB(t *testing.T) {
+	if _, err := NewHandler(Deps{}); err == nil {
+		t.Fatalf("expected error for nil DB")
 	}
 }
 
@@ -147,13 +144,15 @@ func TestLoginSubmitValidTokenSetsCookieAndRedirects(t *testing.T) {
 		t.Errorf("cookie Path = %q; want /ui/", c.Path)
 	}
 
-	// Cookie value should verify with the same key and yield the token.
-	got, err := verifySessionCookie(c.Value, h.deps.SessionKey)
-	if err != nil {
-		t.Fatalf("verifySessionCookie: %v", err)
+	// The cookie is an opaque session id: it must not carry the token,
+	// and it must resolve to a session.
+	if strings.Contains(c.Value, tok) || strings.Contains(c.Value, tok[4:12]) {
+		t.Fatalf("session cookie contains the bearer token")
 	}
-	if got != tok {
-		t.Fatalf("token round-trip mismatch")
+	req = httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(c)
+	if _, ok := h.sessionIdentity(req); !ok {
+		t.Fatalf("cookie from login does not resolve to a session")
 	}
 }
 
@@ -202,7 +201,7 @@ func TestLoginSubmitNonAdminTokenRejected(t *testing.T) {
 func TestNonAdminSessionTreatedAsAnonymous(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "reader", "read:prod", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	for _, path := range []string{"/", "/events", "/storage", "/cells"} {
 		rec := httptest.NewRecorder()
@@ -230,7 +229,7 @@ func TestLoginSubmitEmptyTokenRedirects(t *testing.T) {
 func TestHomeRendersDashboardWhenAuthenticated(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/", nil)
@@ -252,7 +251,7 @@ func TestHomeRendersDashboardWhenAuthenticated(t *testing.T) {
 func TestHomeShowsSeededChannelAndEvent(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	// Seed a channel, a package (so the card shows "1 package"), and a
 	// publish event (so the activity table has a row).
@@ -294,7 +293,7 @@ func TestHomeShowsSeededChannelAndEvent(t *testing.T) {
 func TestLoginFormRedirectsWhenAlreadyAuthenticated(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/login", nil)
@@ -312,7 +311,7 @@ func TestLoginFormRedirectsWhenAlreadyAuthenticated(t *testing.T) {
 func TestRevokedTokenCookieTreatedAsAnonymous(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "ex", "admin", true)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/", nil)
@@ -328,10 +327,12 @@ func TestRevokedTokenCookieTreatedAsAnonymous(t *testing.T) {
 func TestTamperedCookieRejected(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
-	// Flip a character in the signature half.
-	i := strings.IndexByte(value, '.')
-	tampered := value[:i+1] + "AAAA" + value[i+5:]
+	value := sessionFor(t, h, tok)
+	// Change one character of the session id.
+	tampered := "A" + value[1:]
+	if value[0] == 'A' {
+		tampered = "B" + value[1:]
+	}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/", nil)
@@ -347,7 +348,7 @@ func TestTamperedCookieRejected(t *testing.T) {
 func TestLogoutClearsCookie(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/logout", nil)
@@ -369,7 +370,7 @@ func TestLogoutClearsCookie(t *testing.T) {
 func TestChannelDetailRenders(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx,
@@ -414,7 +415,7 @@ func TestChannelDetailRenders(t *testing.T) {
 func TestChannelDetail404(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/channels/nope", nil)
@@ -460,7 +461,7 @@ func TestFmtBytes(t *testing.T) {
 func TestEventsPageRendersWithFiltersAndPagination(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx,
@@ -525,7 +526,7 @@ func TestCellsPageShowsMatrixAndCoverage(t *testing.T) {
 		},
 	}
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx,
@@ -567,7 +568,7 @@ func TestCellsPageShowsMatrixAndCoverage(t *testing.T) {
 func TestCellsPageNoMatrix(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/cells", nil)
@@ -585,7 +586,7 @@ func TestCellsPageNoMatrix(t *testing.T) {
 func TestStoragePageRenders(t *testing.T) {
 	h, database := newTestHandler(t)
 	tok := seedToken(t, database.DB, "op", "admin", false)
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value := sessionFor(t, h, tok)
 
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx,
@@ -638,30 +639,103 @@ func TestStaticAssetsServed(t *testing.T) {
 	}
 }
 
-func TestSessionCookieRoundTrip(t *testing.T) {
-	key := []byte("round-trip-key-here-32-bytes!!!!")
-	got, err := verifySessionCookie(signSessionCookie("pkm_abc", key), key)
+// sessionFor creates a session for the token directly, like a login
+// would, including for revoked or non-admin tokens.
+func sessionFor(t *testing.T, h *Handler, tok string) string {
+	t.Helper()
+	var id int64
+	if err := h.deps.DB.QueryRowContext(context.Background(),
+		`SELECT id FROM tokens WHERE token_sha256 = ?`, auth.HashToken(tok)).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	value, _, err := h.createSession(context.Background(), id)
 	if err != nil {
-		t.Fatalf("verify: %v", err)
+		t.Fatal(err)
 	}
-	if got != "pkm_abc" {
-		t.Fatalf("got %q want pkm_abc", got)
+	return value
+}
+
+func withCookie(req *http.Request, value string) *http.Request {
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+	return req
+}
+
+func TestLogoutRevokesSessionServerSide(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	value := sessionFor(t, h, tok)
+
+	h.ServeHTTP(httptest.NewRecorder(), withCookie(httptest.NewRequest("POST", "/logout", nil), value))
+
+	// Replaying the old cookie (e.g. a copy taken before logout) fails.
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, withCookie(httptest.NewRequest("GET", "/", nil), value))
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/ui/login" {
+		t.Fatalf("session survived logout: status=%d loc=%q", rec.Code, rec.Header().Get("Location"))
 	}
 }
 
-func TestSessionCookieWrongKeyRejected(t *testing.T) {
-	v := signSessionCookie("pkm_abc", []byte("key-one-32-bytes-padded-padded!!"))
-	if _, err := verifySessionCookie(v, []byte("key-two-32-bytes-padded-padded!!")); err == nil {
-		t.Fatal("expected error for wrong key")
+func TestExpiredSessionRejected(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	value := sessionFor(t, h, tok)
+	if _, err := database.ExecContext(context.Background(),
+		`UPDATE ui_sessions SET expires_at = ?`, time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, withCookie(httptest.NewRequest("GET", "/", nil), value))
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expired session accepted: status=%d", rec.Code)
 	}
 }
 
-func TestSessionCookieMalformedRejected(t *testing.T) {
-	key := []byte("test-key")
-	cases := []string{"", "nodothere", "a.!!!invalid", "!!!.bbb"}
-	for _, c := range cases {
-		if _, err := verifySessionCookie(c, key); err == nil {
-			t.Errorf("expected error for %q", c)
+func TestUnknownSessionRejected(t *testing.T) {
+	h, _ := newTestHandler(t)
+	for _, v := range []string{"", "garbage", strings.Repeat("A", 43)} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, withCookie(httptest.NewRequest("GET", "/", nil), v))
+		if rec.Code != http.StatusFound {
+			t.Errorf("cookie %q: status=%d, want redirect", v, rec.Code)
 		}
+	}
+}
+
+func TestCrossOriginPostRefused(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "op", "admin", false)
+	form := url.Values{"token": {tok}}
+
+	cases := []struct {
+		name   string
+		header map[string]string
+		want   int
+	}{
+		{"cross-site fetch metadata", map[string]string{"Sec-Fetch-Site": "cross-site"}, http.StatusForbidden},
+		{"foreign origin", map[string]string{"Origin": "https://evil.example"}, http.StatusForbidden},
+		{"same origin", map[string]string{"Origin": "http://example.com", "Sec-Fetch-Site": "same-origin"}, http.StatusFound},
+		{"no browser headers", nil, http.StatusFound},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		for k, v := range c.header {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("%s: status = %d, want %d", c.name, rec.Code, c.want)
+		}
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	h, _ := newTestHandler(t)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/login", nil))
+	if rec.Header().Get("X-Frame-Options") != "DENY" ||
+		!strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		t.Errorf("missing anti-framing headers: %v", rec.Header())
 	}
 }

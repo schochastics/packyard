@@ -13,7 +13,6 @@ optional and only needed once you outgrow the command-line flags.
   cas/                  # content-addressable blob store, <aa>/<rest> shards
   channels.yaml         # channel definitions
   matrix.yaml           # binary matrix (cells)
-  ui-session-key        # 32-byte HMAC key (auto-generated, 0600)
 ```
 
 The data dir is:
