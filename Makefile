@@ -29,10 +29,14 @@ lint: ## Run golangci-lint (installs if missing)
 	}
 	golangci-lint run ./...
 
+# v0.29.0 is the newest vacuum that builds with the pinned go 1.25.0
+# (v0.30.x needs 1.25.7+, v0.30.5+ needs 1.26); bump with the toolchain.
+VACUUM_VERSION ?= v0.29.0
+
 openapi-lint: ## Lint openapi/openapi.yaml with vacuum (installs if missing)
 	@command -v vacuum >/dev/null 2>&1 || { \
 		echo "installing vacuum..."; \
-		go install github.com/daveshanley/vacuum@latest; \
+		go install github.com/daveshanley/vacuum@$(VACUUM_VERSION); \
 	}
 	vacuum lint --details --errors openapi/openapi.yaml
 
