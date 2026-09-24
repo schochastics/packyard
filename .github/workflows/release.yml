@@ -76,3 +76,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A commit can carry several tags (v1.2.2-rc.1 and v1.2.2);
+          # release the one that was pushed, not whichever git describes.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
