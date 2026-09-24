@@ -55,7 +55,25 @@ type Index struct {
 type indexEntry struct {
 	body    []byte
 	expires time.Time
+	// stale marks a proxy index kept past its TTL because upstream
+	// failed; it is served until the retry backoff expires.
+	stale bool
 }
+
+// proxyRead describes how a proxy index body was obtained.
+type proxyRead int
+
+const (
+	proxyFresh        proxyRead = iota // from upstream or within TTL
+	proxyStale                         // cached body served during an upstream outage
+	proxyStaleStarted                  // first stale serve of this outage
+)
+
+// proxyRetryBackoff is how long a stale proxy index is served before
+// upstream is tried again. Retrying on every request would make each
+// one wait out the upstream timeout while upstream hangs, longer than
+// R waits for PACKAGES.
+const proxyRetryBackoff = 30 * time.Second
 
 // NewIndex constructs an Index. A 5-minute TTL bounds staleness from
 // any code path that bypasses InvalidateChannel (direct SQL, a future
@@ -90,12 +108,12 @@ func linuxKey(channel, cell string) string { return channelKeyPrefix(channel) + 
 // meta may be nil — in that case the channel is treated as local,
 // matching the pre-proxy behavior. fetcher is consulted only on the
 // proxy branch.
-func (i *Index) GetSource(ctx context.Context, channel string, meta *channelMeta, fetcher *upstream.Fetcher) (body []byte, stale bool, err error) {
+func (i *Index) GetSource(ctx context.Context, channel string, meta *channelMeta, fetcher *upstream.Fetcher) (body []byte, read proxyRead, err error) {
 	if meta.IsProxy() {
 		return i.getSourceProxy(ctx, channel, meta.Upstream, fetcher)
 	}
 	body, err = i.getSourceLocal(ctx, channel)
-	return body, false, err
+	return body, proxyFresh, err
 }
 
 // GetLinux returns the /__linux__/ PACKAGES body for channel as seen
@@ -103,11 +121,12 @@ func (i *Index) GetSource(ctx context.Context, channel string, meta *channelMeta
 // version, so every entry is a source entry). See [Index.GetSource]
 // for the proxy/stale semantics; a proxy channel serves the upstream
 // binary index configured for the cell, else its source index.
-func (i *Index) GetLinux(ctx context.Context, channel string, cell *config.Cell, arch string, meta *channelMeta, fetcher *upstream.Fetcher) (body []byte, stale bool, err error) {
+func (i *Index) GetLinux(ctx context.Context, channel string, cell *config.Cell, arch string, meta *channelMeta, fetcher *upstream.Fetcher) (body []byte, read proxyRead, err error) {
 	if meta.IsProxy() {
 		if cell != nil {
 			if base := meta.Upstream.BinaryURLs[cell.Name]; base != "" {
-				return i.getProxyIndex(ctx, linuxKey(channel, cell.Name), base, meta.Upstream.IndexTTL, meta.Upstream.Timeout, fetcher)
+				return i.getProxyIndex(ctx, linuxKey(channel, cell.Name), base, rUserAgent(cell, arch),
+					meta.Upstream.IndexTTL, meta.Upstream.Timeout, fetcher)
 			}
 		}
 		return i.getSourceProxy(ctx, channel, meta.Upstream, fetcher)
@@ -118,16 +137,16 @@ func (i *Index) GetLinux(ctx context.Context, channel string, cell *config.Cell,
 	}
 	key := linuxKey(channel, cellName)
 	if body, ok := i.lookup(key); ok {
-		return body, false, nil
+		return body, proxyFresh, nil
 	}
 	gen := i.generation(channel)
 	rows, err := i.latestRows(ctx, channel, cellName)
 	if err != nil {
-		return nil, false, err
+		return nil, proxyFresh, err
 	}
 	body = formatPackages(rows, cell, arch)
 	i.storeIfCurrent(key, channel, gen, body)
-	return body, false, nil
+	return body, proxyFresh, nil
 }
 
 func (i *Index) getSourceLocal(ctx context.Context, channel string) ([]byte, error) {
@@ -144,38 +163,57 @@ func (i *Index) getSourceLocal(ctx context.Context, channel string) ([]byte, err
 	return body, nil
 }
 
-func (i *Index) getSourceProxy(ctx context.Context, channel string, up upstreamView, fetcher *upstream.Fetcher) ([]byte, bool, error) {
-	return i.getProxyIndex(ctx, sourceKey(channel), up.SourceURL, up.IndexTTL, up.Timeout, fetcher)
+func (i *Index) getSourceProxy(ctx context.Context, channel string, up config.UpstreamConfig, fetcher *upstream.Fetcher) ([]byte, proxyRead, error) {
+	return i.getProxyIndex(ctx, sourceKey(channel), up.SourceURL, "", up.IndexTTL, up.Timeout, fetcher)
 }
 
 // getProxyIndex is the shared "fetch from upstream with TTL +
 // stale-while-error" core used by both source and binary proxy paths.
-func (i *Index) getProxyIndex(ctx context.Context, key, baseURL string, ttl, timeout time.Duration, fetcher *upstream.Fetcher) ([]byte, bool, error) {
+// userAgent is forwarded upstream ("" for the default).
+//
+// When a refresh fails and a previous body exists, that body is served
+// and kept for proxyRetryBackoff, so requests during an outage get the
+// stale index immediately instead of each waiting on upstream.
+func (i *Index) getProxyIndex(ctx context.Context, key, baseURL, userAgent string, ttl, timeout time.Duration, fetcher *upstream.Fetcher) ([]byte, proxyRead, error) {
 	if fetcher == nil {
-		return nil, false, fmt.Errorf("proxy channel %q needs a fetcher; none configured", key)
+		return nil, proxyFresh, fmt.Errorf("proxy channel %q needs a fetcher; none configured", key)
 	}
 	prev, hasPrev := i.peek(key)
 	if hasPrev && time.Now().Before(prev.expires) {
-		return prev.body, false, nil
+		if prev.stale {
+			return prev.body, proxyStale, nil
+		}
+		return prev.body, proxyFresh, nil
 	}
-	body, _, err := fetcher.FetchIndex(ctx, baseURL, timeout)
+	body, err := fetcher.FetchIndex(ctx, baseURL, userAgent, timeout)
 	if err != nil {
 		if hasPrev {
-			// Stale-while-error: keep the previous body in the cache
-			// so the next reader also gets it. We don't bump its
-			// expiry — we want the next request to re-try upstream.
-			return prev.body, true, nil
+			read := proxyStale
+			if !prev.stale {
+				read = proxyStaleStarted
+			}
+			i.mu.Lock()
+			i.entries[key] = indexEntry{body: prev.body, expires: time.Now().Add(proxyRetryBackoff), stale: true}
+			i.mu.Unlock()
+			return prev.body, read, nil
 		}
-		return nil, false, err
+		return nil, proxyFresh, err
 	}
 	i.storeWithTTL(key, body, ttl)
-	return body, false, nil
+	return body, proxyFresh, nil
 }
 
-// upstreamView is a documentation alias of [config.UpstreamConfig].
-// Kept distinct from channelMeta so test fixtures can construct an
-// Upstream without importing the api package's internal types.
-type upstreamView = config.UpstreamConfig
+// rUserAgent is the User-Agent R itself would send for cell, e.g.
+// "R (4.4.0 x86_64-pc-linux-gnu x86_64 linux-gnu)". Upstreams such as
+// Posit Package Manager pick binary or source from it.
+func rUserAgent(cell *config.Cell, arch string) string {
+	triple := archTriples[arch]
+	if triple == "" {
+		triple = archTriples["amd64"]
+	}
+	cpu, _, _ := strings.Cut(triple, "-")
+	return fmt.Sprintf("R (%s.0 %s %s linux-gnu)", cell.RMinor, triple, cpu)
+}
 
 // InvalidateChannel drops every cached view of channel: source
 // PACKAGES, each /__linux__/ variant and Meta/archive.rds. Called by
