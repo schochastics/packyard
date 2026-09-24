@@ -115,7 +115,7 @@ func Lookup(ctx context.Context, db *sql.DB, plaintext string) (Identity, error)
 // lastUsedInterval bounds how often touchLastUsed writes per token.
 // Every authenticated request (each PACKAGES and tarball GET of an R
 // client with a read token) would otherwise be a SQLite write, all
-// serialised on the one write lock.
+// serialized on the one write lock.
 const lastUsedInterval = time.Minute
 
 // lastTouched maps token id → time of the last last_used_at write.

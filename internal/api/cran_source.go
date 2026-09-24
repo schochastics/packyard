@@ -442,7 +442,7 @@ func requireReadScope(w http.ResponseWriter, r *http.Request, deps Deps, channel
 // gzipBytes is a one-shot compressor. The inputs are small (a few KB
 // to a few MB of PACKAGES text), so the whole-in-memory approach is
 // fine and simpler than streaming.
-// gzCache memoises gzipped index bodies by content hash. R asks for
+// gzCache memoizes gzipped index bodies by content hash. R asks for
 // PACKAGES.gz on every install, and a proxy channel's CRAN index is
 // several MB: hashing it is far cheaper than recompressing it. The
 // cache holds only the few bodies currently being served.
