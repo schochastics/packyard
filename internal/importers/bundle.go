@@ -544,7 +544,11 @@ func safeJoin(root, rel string) (string, error) {
 // per-entry size at 16 GiB so a maliciously crafted archive can't
 // fill the disk silently.
 func extractTarGz(src, dst string) error {
-	const maxEntryBytes int64 = 16 << 30 // 16 GiB
+	const (
+		maxEntryBytes int64 = 16 << 30  // 16 GiB per file
+		maxTotalBytes int64 = 512 << 30 // 512 GiB per bundle; a full CRAN source snapshot is ~30 GiB
+	)
+	var total int64
 
 	f, err := os.Open(src) //nolint:gosec // src is the operator-supplied bundle path
 	if err != nil {
@@ -597,6 +601,9 @@ func extractTarGz(src, dst string) error {
 			}
 			if n > maxEntryBytes {
 				return fmt.Errorf("tar entry %q exceeds %d bytes", hdr.Name, maxEntryBytes)
+			}
+			if total += n; total > maxTotalBytes {
+				return fmt.Errorf("bundle archive expands to more than %d bytes", maxTotalBytes)
 			}
 		case tar.TypeSymlink, tar.TypeLink:
 			return fmt.Errorf("tar entry %q is a link; not supported in bundles", hdr.Name)

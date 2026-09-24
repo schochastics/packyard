@@ -359,18 +359,19 @@ Subsystem checks:
 ### `/metrics`
 
 Public Prometheus text format, on the main listener, or only on
-`metrics_listen` when that is set ([config.md](config.md#separate-metrics-listener)). A hermetic registry is used, so only
-packyard-owned metrics appear (no Go stdlib metrics leaking through).
+`metrics_listen` when that is set ([config.md](config.md#separate-metrics-listener)). A dedicated registry holds the
+packyard metrics below plus the standard Go runtime (`go_*`) and
+process (`process_*`) collectors.
 
 | Metric | Labels | Meaning |
 |---|---|---|
 | `packyard_http_requests_total` | `method`, `status` | Request counter at the HTTP layer. URL path is intentionally not a label — cardinality discipline. |
 | `packyard_http_request_duration_seconds` | `method`, `status` | Histogram, buckets `[5ms, 10ms, 25ms, 50ms, 100ms, 250ms, 500ms, 1s, 2.5s, 5s, 10s, 30s]`. |
-| `packyard_publish_total` | `channel`, `result` | Publishes: `created` / `overwrote` / `already_existed`. Binary attaches: `binary_attached` / `binary_overwrote` / `binary_already_existed`. |
+| `packyard_publish_total` | `channel`, `result` | Publishes (HTTP and importers): `created` / `overwrote` / `already_existed`. Binary attaches (HTTP and bundle import): `binary_attached` / `binary_overwrote` / `binary_already_existed`. |
 | `packyard_yank_total` | `channel` | Counter. |
 | `packyard_delete_total` | `channel` | Counter. |
 | `packyard_cas_bytes` | — | Gauge of `SUM(source_size) + SUM(size)` across the DB. Logical, not physical — use `du -sh <data>/cas` for on-disk. |
-| `packyard_proxy_fetch_total` | `channel`, `kind`, `outcome` | Proxy-channel upstream fetches. `kind` is `source` / `binary` / `index`; `outcome` is `ok` / `upstream_error` / `stale` (served a cached index after an upstream failure). |
+| `packyard_proxy_fetch_total` | `channel`, `kind`, `result` | Proxy-channel upstream fetches. `kind` is `source` / `binary` / `index`; `result` is `ok` / `upstream_error` / `stale` (served a cached index after an upstream failure). |
 | `packyard_token_create_total` | — | Token mints through the HTTP endpoint. `-mint-token` runs in its own process and isn't counted. |
 | `packyard_token_revoke_total` | — | Token revokes through the HTTP endpoint. |
 

@@ -83,7 +83,7 @@ func New() *Metrics {
 			prometheus.CounterOpts{
 				Namespace: "packyard",
 				Name:      "publish_total",
-				Help:      "Publish attempts by channel and outcome (created, overwrote, already_existed, rejected).",
+				Help:      "Successful publishes and binary attaches by channel and result (created, overwrote, already_existed, binary_attached, binary_overwrote, binary_already_existed).",
 			},
 			[]string{"channel", "result"},
 		),
@@ -109,15 +109,14 @@ func New() *Metrics {
 				Name:      "cas_bytes",
 				Help: "Logical bytes tracked by the DB: SUM(packages.source_size) + " +
 					"SUM(binaries.size). Upper bound on on-disk CAS footprint; " +
-					"actual disk usage is lower when channels share bytes (CAS dedupes). " +
-					"A precise on-disk figure lands with admin gc in B7.",
+					"actual disk usage is lower when channels share bytes (CAS dedupes).",
 			},
 		),
 		ProxyFetchTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: "packyard",
 				Name:      "proxy_fetch_total",
-				Help: "Proxy-channel fetches by channel, kind (source/binary/index), and outcome. " +
+				Help: "Proxy-channel fetches by channel, kind (source/binary/index), and result. " +
 					"`result=ok` covers both upstream hits and locally-cached serves; " +
 					"`stale` is a stale-while-error PACKAGES serve; " +
 					"`upstream_error` is a hard failure surfaced to the client.",

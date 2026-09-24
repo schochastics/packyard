@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/schochastics/packyard/internal/store"
 )
@@ -97,9 +98,9 @@ func ImportSource(ctx context.Context, deps Deps, in ImportInput) (*PublishRespo
 	// the package is already in the DB at this point.
 	if in.Note != "" {
 		if _, err := deps.DB.ExecContext(ctx, `
-			INSERT INTO events(type, actor, channel, package, version, note)
-			VALUES ('import', ?, ?, ?, ?, ?)
-		`, nullIfEmpty(in.Actor), in.Channel, in.Name, in.Version, in.Note); err != nil {
+			INSERT INTO events(at, type, actor, channel, package, version, note)
+			VALUES (?, 'import', ?, ?, ?, ?, ?)
+		`, time.Now().UTC().Format(time.RFC3339Nano), nullIfEmpty(in.Actor), in.Channel, in.Name, in.Version, in.Note); err != nil {
 			// Intentionally not fatal; the publish itself succeeded.
 			slog.Warn("import: annotation event failed", "channel", in.Channel, "package", in.Name, "err", err)
 		}
@@ -203,13 +204,7 @@ func AttachBinaries(ctx context.Context, deps Deps, in AttachInput) (*PublishRes
 	if deps.Index != nil && !res.AlreadyExisted {
 		deps.Index.InvalidateChannel(in.Channel)
 	}
-	if deps.Metrics != nil && !res.AlreadyExisted {
-		result := "created"
-		if res.Overwritten {
-			result = "overwrote"
-		}
-		deps.Metrics.PublishTotal.WithLabelValues(in.Channel, result).Inc()
-	}
+	recordAttachMetric(deps, in.Channel, res)
 	refreshCASBytes(ctx, deps)
 
 	return resp, nil

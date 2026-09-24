@@ -86,7 +86,7 @@ func Backup(ctx context.Context, src Source, dir string) (Result, error) {
 	}
 	defer func() { _ = snap.Close() }()
 
-	sums, err := referencedBlobs(ctx, snap)
+	sums, err := db.ReferencedBlobs(ctx, snap)
 	if err != nil {
 		return res, err
 	}
@@ -95,7 +95,7 @@ func Backup(ctx context.Context, src Source, dir string) (Result, error) {
 		PackyardVersion: src.Version,
 		Blobs:           len(sums),
 	}
-	if m.SchemaVersion, err = schemaVersion(ctx, snap); err != nil {
+	if m.SchemaVersion, err = db.SchemaVersion(ctx, snap); err != nil {
 		return res, err
 	}
 
@@ -186,7 +186,7 @@ func Verify(ctx context.Context, dir string) (VerifyReport, error) {
 		return rep, fmt.Errorf("integrity_check: %w", err)
 	}
 
-	sums, err := referencedBlobs(ctx, snap)
+	sums, err := db.ReferencedBlobs(ctx, snap)
 	if err != nil {
 		return rep, err
 	}
@@ -369,34 +369,6 @@ func openReadOnly(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
 	return d, nil
-}
-
-func referencedBlobs(ctx context.Context, d *sql.DB) ([]string, error) {
-	rows, err := d.QueryContext(ctx, `
-		SELECT source_sha256 FROM packages
-		UNION SELECT binary_sha256 FROM binaries
-		ORDER BY 1`)
-	if err != nil {
-		return nil, fmt.Errorf("list referenced blobs: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var out []string
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
-			return nil, err
-		}
-		out = append(out, s)
-	}
-	return out, rows.Err()
-}
-
-func schemaVersion(ctx context.Context, d *sql.DB) (int, error) {
-	var v sql.NullInt64
-	if err := d.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v); err != nil {
-		return 0, fmt.Errorf("schema version: %w", err)
-	}
-	return int(v.Int64), nil
 }
 
 // blobPath mirrors the CAS layout: <root>/<aa>/<rest>.

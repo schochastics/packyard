@@ -78,7 +78,7 @@ curl -s http://localhost:8080/health | jq
 ```json
 {
   "status": "ok",
-  "version": "v0.3.1",
+  "version": "1.2.1",
   "subsystems": {
     "db": "ok",
     "cas": "ok",
@@ -322,7 +322,7 @@ curl --fail-with-body -X DELETE \
   -H "Authorization: Bearer $ADMIN"
 ```
 
-Required scope: `admin`. On immutable channels this returns 409
+Required scope: `publish:<channel>`. On immutable channels this returns 409
 `channel_immutable` — bump the version and yank the old one instead.
 
 ### CRAN-protocol reads
@@ -409,8 +409,8 @@ Tokens carry a CSV of scopes. Format: `<verb>:<channel>` or a bare
 
 | Scope | Grants |
 |---|---|
-| `admin` | Everything, including minting and revoking tokens, and deleting packages. |
-| `publish:<channel>` | Publish to that channel. `publish:*` for any. |
+| `admin` | Management endpoints: tokens, channel and package listings, events. It does not imply `publish`/`read`/`yank`. |
+| `publish:<channel>` | Publish to that channel, attach binaries, list missing binaries, and hard-delete on mutable channels. `publish:*` for any. |
 | `yank:<channel>` | Yank in that channel. `yank:*` for any. |
 | `read:<channel>` | CRAN-protocol reads of that channel when it doesn't set `anonymous_reads`. `read:*` for any. |
 

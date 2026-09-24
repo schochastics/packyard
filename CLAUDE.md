@@ -55,6 +55,11 @@ pre-v2 module path installs an incompatible v1.x release.
   server inserts channels present in YAML but missing from the DB,
   and warns on channels present in the DB but absent from YAML. It
   never deletes DB rows — that would silently orphan packages.
+- **SQLite URIs go through `db.FileURI`.** A raw `"file:" + path`
+  opens the wrong file when the path contains `#` or `?` (fuzz seed
+  temp dirs do).
+- **Only the server migrates.** Admin verbs and backup open the DB with
+  `db.CheckEmbedded` and refuse a schema that isn't exactly theirs.
 - **`BeginTx(ctx, nil)` starts `BEGIN IMMEDIATE`** (`_txlock=immediate`
   in the DSN, [internal/db/db.go](internal/db/db.go)). Every tx is a
   write; readers use plain queries.
@@ -114,8 +119,8 @@ it), and the release job only runs after `go test -race ./...` passes.
 ## Test posture
 
 - Target: 75%+ coverage per `internal/*` package. Current numbers
-  (April 2026): api 81%, auth 93%, cas 82%, config 85%, db 82%,
-  importers 70%, ui 80%.
+  (September 2026): api 84%, auth 89%, backup 74%, cas 81%, config
+  88%, db 76%, importers 75%, store 78%, ui 82%, upstream 90%.
 - Integration-style tests spin up a real HTTP server via
   `httptest.NewServer` and exercise the on-the-wire surface. Prefer
   them for anything that crosses handler / DB / CAS boundaries.

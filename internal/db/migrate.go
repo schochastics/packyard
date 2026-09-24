@@ -79,8 +79,20 @@ func CheckEmbedded(ctx context.Context, db *DB) error {
 }
 
 func currentVersion(ctx context.Context, db *DB) (int, error) {
+	return SchemaVersion(ctx, db.DB)
+}
+
+// Querier is the read surface shared by *sql.DB and *sql.Tx.
+type Querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// SchemaVersion returns the highest applied migration, 0 for a DB
+// that has none.
+func SchemaVersion(ctx context.Context, q Querier) (int, error) {
 	var v sql.NullInt64
-	err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v)
+	err := q.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such table") {
 			return 0, nil
@@ -88,6 +100,30 @@ func currentVersion(ctx context.Context, db *DB) (int, error) {
 		return 0, fmt.Errorf("read schema version: %w", err)
 	}
 	return int(v.Int64), nil
+}
+
+// ReferencedBlobs returns every CAS sha256 a package or binary row
+// references, sorted and deduplicated. Yanked packages are included:
+// yanking hides a version, its bytes stay reachable. This is the live
+// set for gc and the blob set a backup must contain.
+func ReferencedBlobs(ctx context.Context, q Querier) ([]string, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT source_sha256 FROM packages
+		UNION SELECT binary_sha256 FROM binaries
+		ORDER BY 1`)
+	if err != nil {
+		return nil, fmt.Errorf("list referenced blobs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 // migrationFilename matches "NNN_some-name.sql" where NNN is one or more digits.

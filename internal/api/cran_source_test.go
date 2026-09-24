@@ -235,3 +235,37 @@ func TestUnknownChannelPACKAGES404(t *testing.T) {
 		t.Errorf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+// Tarballs honor conditional and range requests (resumed downloads,
+// caching proxies) and HEAD.
+func TestSourceTarballConditionalAndRange(t *testing.T) {
+	t.Parallel()
+
+	fx := newPublishFixture(t)
+	content := []byte("0123456789abcdef")
+	publishSource(t, fx, "dev", "alpha", "1.0.0", content)
+	url := "/dev/src/contrib/alpha_1.0.0.tar.gz"
+	etag := getURL(t, fx, url, fx.token).Header().Get("ETag")
+
+	do := func(method string, hdr map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, url, nil)
+		req.Header.Set("Authorization", "Bearer "+fx.token)
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		fx.mux.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do(http.MethodGet, map[string]string{"If-None-Match": etag}); rec.Code != http.StatusNotModified {
+		t.Errorf("If-None-Match: status %d, want 304", rec.Code)
+	}
+	rec := do(http.MethodGet, map[string]string{"Range": "bytes=10-"})
+	if rec.Code != http.StatusPartialContent || rec.Body.String() != "abcdef" {
+		t.Errorf("Range: status %d body %q", rec.Code, rec.Body.String())
+	}
+	rec = do(http.MethodHead, nil)
+	if rec.Code != http.StatusOK || rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != "16" {
+		t.Errorf("HEAD: status %d len %d CL %q", rec.Code, rec.Body.Len(), rec.Header().Get("Content-Length"))
+	}
+}

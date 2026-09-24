@@ -593,3 +593,17 @@ func TestAdminGCRefusesEmptyLiveSet(t *testing.T) {
 		t.Errorf("-force did not collect: %v", err)
 	}
 }
+
+func TestReorderFlagsFirst(t *testing.T) {
+	cases := []struct{ in, want []string }{
+		{[]string{"url", "-channel", "dev"}, []string{"-channel", "dev", "url"}},
+		{[]string{"-channel", "dev", "url"}, []string{"-channel", "dev", "url"}},
+		{[]string{"url", "-channel=dev", "-branch", "main"}, []string{"-channel=dev", "-branch", "main", "url"}},
+		{[]string{"a", "--", "b"}, []string{"a", "--", "b"}},
+	}
+	for _, c := range cases {
+		if got := reorderFlagsFirst(c.in); strings.Join(got, " ") != strings.Join(c.want, " ") {
+			t.Errorf("reorderFlagsFirst(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
