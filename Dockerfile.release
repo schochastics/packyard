@@ -6,7 +6,10 @@
 
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY packyard-server /usr/local/bin/packyard-server
+# GoReleaser's dockers_v2 lays the binaries out as <os>/<arch>/ in the
+# build context; buildx sets TARGETPLATFORM per platform.
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/packyard-server /usr/local/bin/packyard-server
 
 USER nonroot:nonroot
 # WORKDIR creates directories owned by USER. /backup is the mount point
