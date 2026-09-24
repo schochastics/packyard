@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/schochastics/packyard/internal/api"
 	"github.com/schochastics/packyard/internal/cas"
@@ -220,19 +221,24 @@ func verifyBlobs(deps api.Deps) ([]missingBlob, error) {
 }
 
 // adminGC reclaims CAS blobs that no longer appear in any package or
-// binary row. Safe to run while the server is stopped; running against
-// a live server is a known-sharp-edge op — see the cas.GC doc comment.
+// binary row. Safe to run against a live server: blobs younger than
+// -min-age are kept, which covers publishes still uploading.
 //
 // Output reports scanned / removed / freed bytes so an operator can
 // tell at a glance whether the run did anything.
 func adminGC(cfg *config.ServerConfig, args []string) error {
 	fs := flag.NewFlagSet("admin gc", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "print what would be removed; do not actually delete")
+	minAge := fs.Duration("min-age", time.Hour, "keep unreferenced blobs and temp files newer than this (protects in-flight publishes)")
+	force := fs.Bool("force", false, "collect even when the DB references no blobs at all")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return adminUsageError("admin gc: no positional arguments expected")
+	}
+	if *minAge < 0 {
+		return adminUsageError("admin gc: -min-age must not be negative")
 	}
 
 	deps, cleanup, err := openAdminDeps(cfg)
@@ -247,21 +253,36 @@ func adminGC(cfg *config.ServerConfig, args []string) error {
 	}
 	fmt.Printf("live blobs referenced by DB: %d\n", len(live))
 
-	if *dryRun {
-		// Dry run: walk what GC would scan and report, but don't delete.
-		// Swap live with a dummy that claims every blob is live, so GC
-		// walks without removing anything, then re-walk ourselves to
-		// compute the count. Simpler: duplicate the small bit of walk
-		// logic here with a Has check.
-		return dryRunGC(deps, live)
+	// An empty live set over a non-empty CAS almost always means the
+	// wrong DB (a fresh volume, a restored-over file), not a repository
+	// whose every package was deleted. Collecting would wipe the store.
+	if len(live) == 0 && !*force && !*dryRun {
+		probe, err := deps.CAS.GC(live, cas.GCOptions{DryRun: true})
+		if err != nil {
+			return fmt.Errorf("gc: %w", err)
+		}
+		if probe.Scanned > 0 {
+			return fmt.Errorf("gc: the DB references no blobs but the CAS holds %d; refusing to delete them all (check -data, or pass -force)", probe.Scanned)
+		}
 	}
 
-	report, err := deps.CAS.GC(live)
+	opts := cas.GCOptions{MinAge: *minAge, DryRun: *dryRun}
+	if *dryRun {
+		opts.OnRemove = func(sum string, size int64) {
+			fmt.Printf("  would remove: %s (%s)\n", sum, humanBytes(size))
+		}
+	}
+	report, err := deps.CAS.GC(live, opts)
 	if err != nil {
 		return fmt.Errorf("gc: %w", err)
 	}
-	fmt.Printf("scanned=%d removed=%d freed=%s skipped_stray=%d\n",
-		report.Scanned, report.Removed, humanBytes(report.FreedBytes), report.SkippedStray)
+	prefix := ""
+	if *dryRun {
+		prefix = "DRY RUN — "
+	}
+	fmt.Printf("%sscanned=%d removed=%d freed=%s skipped_young=%d skipped_stray=%d tmp_removed=%d\n",
+		prefix, report.Scanned, report.Removed, humanBytes(report.FreedBytes),
+		report.SkippedYoung, report.SkippedStray, report.TmpRemoved)
 	return nil
 }
 
@@ -295,53 +316,6 @@ func liveBlobSet(deps api.Deps) (map[string]struct{}, error) {
 		return nil, err
 	}
 	return out, nil
-}
-
-// dryRunGC reports what a real GC would remove, without deleting. No
-// new CAS API needed: we use cas.Has to check each filesystem blob
-// that isn't in live. Walks via filepath.Walk for simplicity since a
-// dry-run doesn't need the subtree-skip logic GC has for tmp/.
-func dryRunGC(deps api.Deps, live map[string]struct{}) error {
-	root := deps.CAS.Root()
-	var scanned, wouldRemove int
-	var wouldFree int64
-
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if filepath.Base(path) == "tmp" && filepath.Dir(path) == root {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		// <aa>/<rest> shape — reuse cas' own check indirectly by
-		// reassembling sha.
-		shard, file := filepath.Split(rel)
-		shard = strings.TrimSuffix(shard, string(filepath.Separator))
-		if len(shard) != 2 || len(file) != 62 {
-			return nil
-		}
-		sum := shard + file
-		scanned++
-		if _, ok := live[sum]; !ok {
-			wouldRemove++
-			wouldFree += info.Size()
-			fmt.Printf("  would remove: %s (%s)\n", sum, humanBytes(info.Size()))
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	fmt.Printf("DRY RUN — scanned=%d would_remove=%d would_free=%s\n",
-		scanned, wouldRemove, humanBytes(wouldFree))
-	return nil
 }
 
 func adminChannels(cfg *config.ServerConfig, args []string) error {
@@ -707,7 +681,7 @@ func openAdminDeps(cfg *config.ServerConfig) (api.Deps, func(), error) {
 		fmt.Fprintf(os.Stderr, "warning: matrix: %v\n", err)
 	}
 
-	database, err := openDB(cfg)
+	database, err := openExistingDB(cfg)
 	if err != nil {
 		return api.Deps{}, nil, err
 	}

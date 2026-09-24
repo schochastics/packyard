@@ -21,9 +21,8 @@ The data dir is:
 1. `data_dir` from `server.yaml` when `-config` is set (`-data` is
    then ignored);
 2. otherwise the `-data <dir>` flag (default `./data`, relative to the
-   working directory). The image's working directory is `/data`, so
-   always pass `-data /data` there; the default would resolve to
-   `/data/data`.
+   working directory). The image's working directory is `/`, so in
+   the container the default is the `/data` volume.
 
 `channels_file` / `matrix_file` in `server.yaml` move those two files
 out of the data dir, e.g. onto a read-only config mount.

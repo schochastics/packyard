@@ -14,6 +14,9 @@ USER nonroot:nonroot
 # mounted there start out writable (distroless has no shell to chown).
 WORKDIR /backup
 WORKDIR /data
+# Run from / so the default `-data ./data` resolves to the /data volume
+# for the server and for `docker exec … admin …` alike.
+WORKDIR /
 VOLUME ["/data"]
 EXPOSE 8080
 

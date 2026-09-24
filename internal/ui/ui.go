@@ -336,8 +336,11 @@ func (h *Handler) handleLoginForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var fl *flash
-	if r.URL.Query().Get("invalid") == "1" {
+	switch {
+	case r.URL.Query().Get("invalid") == "1":
 		fl = &flash{Kind: "error", Message: "Token not recognized, revoked, or expired."}
+	case r.URL.Query().Get("forbidden") == "1":
+		fl = &flash{Kind: "error", Message: "The dashboard needs a token with the admin scope."}
 	}
 	h.renderPage(w, r, "login.html", viewData{
 		Title: "Sign in",
@@ -357,9 +360,16 @@ func (h *Handler) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate against the DB exactly like bearer auth would.
-	if _, err := auth.Lookup(r.Context(), h.deps.DB.DB, tok); err != nil {
+	// Validate against the DB exactly like bearer auth would. The pages
+	// show every channel and the audit log, which the API reserves for
+	// admin, so the dashboard does too.
+	id, err := auth.Lookup(r.Context(), h.deps.DB.DB, tok)
+	if err != nil {
 		http.Redirect(w, r, "/ui/login?invalid=1", http.StatusFound)
+		return
+	}
+	if !id.Scopes.Has(auth.ScopeAdmin) {
+		http.Redirect(w, r, "/ui/login?forbidden=1", http.StatusFound)
 		return
 	}
 
@@ -393,7 +403,8 @@ func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // sessionIdentity reads the cookie, verifies the signature, and resolves
 // the token to a DB row. Returns (id, true) on success; (zero, false)
-// for missing, tampered, or revoked sessions.
+// for missing, tampered, or revoked sessions, and for tokens that lost
+// the admin scope since login.
 func (h *Handler) sessionIdentity(r *http.Request) (auth.Identity, bool) {
 	c, err := r.Cookie(sessionCookieName)
 	if err != nil {
@@ -404,7 +415,7 @@ func (h *Handler) sessionIdentity(r *http.Request) (auth.Identity, bool) {
 		return auth.Identity{}, false
 	}
 	id, err := auth.Lookup(r.Context(), h.deps.DB.DB, tok)
-	if err != nil {
+	if err != nil || !id.Scopes.Has(auth.ScopeAdmin) {
 		return auth.Identity{}, false
 	}
 	return id, true

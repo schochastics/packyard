@@ -116,6 +116,28 @@ func TestYankMarksRowAndEmitsEvent(t *testing.T) {
 	}
 }
 
+// JSON bodies are decoded from a buffered copy; a body larger than the
+// decoder's read chunk must survive intact.
+func TestYankAcceptsLargeBody(t *testing.T) {
+	t.Parallel()
+
+	fx := newPublishFixture(t)
+	seedPublished(t, fx, "prod", "mypkg", "1.0.0")
+
+	reason := strings.Repeat("r", 2048)
+	rec := doYank(t, fx, "prod", "mypkg", "1.0.0", fx.token, `{"reason": "`+reason+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var resp YankResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Reason != reason {
+		t.Errorf("reason length = %d, want %d", len(resp.Reason), len(reason))
+	}
+}
+
 func TestYankAcceptsEmptyBody(t *testing.T) {
 	t.Parallel()
 

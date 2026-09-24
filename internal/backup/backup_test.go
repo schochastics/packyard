@@ -226,3 +226,67 @@ func TestVerifyDetectsDamage(t *testing.T) {
 		t.Error("verify of a non-backup dir succeeded")
 	}
 }
+
+// A backup that fails midway (here: a blob the DB references is gone)
+// must leave the previous backup in the same dir intact.
+func TestFailedBackupKeepsPreviousSnapshot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	src := newDataDir(t)
+	src.publish(t, "alpha", "alpha source", "")
+	out := t.TempDir()
+	if _, err := backup.Backup(ctx, src.source(), out); err != nil {
+		t.Fatal(err)
+	}
+
+	src.publish(t, "beta", "beta source", "")
+	var sum string
+	if err := src.db.QueryRowContext(ctx, `SELECT source_sha256 FROM packages WHERE name = 'beta'`).Scan(&sum); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(src.dir, "cas", sum[:2], sum[2:])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backup.Backup(ctx, src.source(), out); err == nil {
+		t.Fatal("backup with a missing blob succeeded")
+	}
+
+	rep, err := backup.Verify(ctx, out)
+	if err != nil || !rep.OK() || rep.Checked != 1 {
+		t.Fatalf("previous backup damaged: %+v, %v", rep, err)
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(out, "db.sqlite.tmp-*"))
+	if len(leftovers) != 0 {
+		t.Errorf("snapshot temp files left behind: %v", leftovers)
+	}
+}
+
+// Verify and Restore ignore dot files a killed copy left in cas/.
+func TestVerifyIgnoresLeftoverTempFiles(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	src := newDataDir(t)
+	src.publish(t, "alpha", "alpha source", "")
+	out := t.TempDir()
+	if _, err := backup.Backup(ctx, src.source(), out); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(out, "cas", "ab"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, "cas", "ab", ".restore-123"), []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := backup.Verify(ctx, out)
+	if err != nil || !rep.OK() {
+		t.Fatalf("verify = %+v, %v", rep, err)
+	}
+	target := t.TempDir()
+	if _, err := backup.Restore(ctx, out, backup.Target{DataDir: target}); err != nil {
+		t.Fatal(err)
+	}
+	staged, _ := filepath.Glob(filepath.Join(target, ".restore-*"))
+	if len(staged) != 0 {
+		t.Errorf("staging dir left behind: %v", staged)
+	}
+}

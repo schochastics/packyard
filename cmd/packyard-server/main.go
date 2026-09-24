@@ -157,6 +157,22 @@ func runInit(cfg *config.ServerConfig, opts config.BootstrapOptions) error {
 	return nil
 }
 
+// openExistingDB is openDB for commands that operate on an existing
+// repository (admin verbs, backup). SQLite would otherwise create an
+// empty DB at a mistyped path, and a backup or gc against an empty DB
+// looks like a repository with nothing in it: a backup that silently
+// holds nothing, or a gc that deletes every blob.
+func openExistingDB(cfg *config.ServerConfig) (*db.DB, error) {
+	path := filepath.Join(cfg.DataDir, "db.sqlite")
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("no database at %s (check -data; run the server or -init once to create one)", path)
+		}
+		return nil, fmt.Errorf("stat db: %w", err)
+	}
+	return openDB(cfg)
+}
+
 func openDB(cfg *config.ServerConfig) (*db.DB, error) {
 	path := filepath.Join(cfg.DataDir, "db.sqlite")
 	database, err := db.Open(context.Background(), path)

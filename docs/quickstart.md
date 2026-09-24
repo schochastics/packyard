@@ -165,7 +165,8 @@ too.
 ## See it in the dashboard
 
 Point a browser at `http://localhost:8080/ui/`, paste `$ADMIN` into the
-login form, and the dashboard shows:
+login form (the dashboard only accepts tokens with the `admin` scope),
+and it shows:
 
 - Three totals: channels, packages, events.
 - A card for each channel; `prod` now reports 1 package.
