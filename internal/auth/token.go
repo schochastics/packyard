@@ -118,18 +118,25 @@ func Lookup(ctx context.Context, db *sql.DB, plaintext string) (Identity, error)
 // serialized on the one write lock.
 const lastUsedInterval = time.Minute
 
-// lastTouched maps token id → time of the last last_used_at write.
+// lastTouched maps a touchKey to the time of the last last_used_at
+// write. Keyed by DB handle too: token ids are only unique per DB.
 var lastTouched sync.Map
+
+type touchKey struct {
+	db *sql.DB
+	id int64
+}
 
 // touchLastUsed bumps tokens.last_used_at, at most once per
 // lastUsedInterval per token, so the column is accurate to about a
 // minute. Best-effort: a failure here must not reject the request.
 func touchLastUsed(ctx context.Context, db *sql.DB, id int64) {
 	now := time.Now()
-	if prev, ok := lastTouched.Load(id); ok && now.Sub(prev.(time.Time)) < lastUsedInterval {
+	key := touchKey{db, id}
+	if prev, ok := lastTouched.Load(key); ok && now.Sub(prev.(time.Time)) < lastUsedInterval {
 		return
 	}
-	lastTouched.Store(id, now)
+	lastTouched.Store(key, now)
 	_, _ = db.ExecContext(ctx,
 		`UPDATE tokens SET last_used_at = ? WHERE id = ?`,
 		now.UTC().Format(time.RFC3339Nano),

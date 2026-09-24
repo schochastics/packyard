@@ -37,6 +37,9 @@ func main() {
 	// common case (just run the server).
 	if len(os.Args) > 1 && os.Args[1] == "admin" {
 		if err := adminMain(os.Args[2:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return // -h: the flag package already printed usage
+			}
 			fmt.Fprintf(os.Stderr, "packyard-server: %v\n", err)
 			os.Exit(1)
 		}
@@ -63,6 +66,16 @@ func main() {
 		fmt.Println(version.Version)
 		return
 	}
+
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "packyard-server: unexpected arguments %q (subcommands: admin)\n", flag.Args())
+		os.Exit(2)
+	}
+	if *initDistro != "" && !*initStorage {
+		fmt.Fprintln(os.Stderr, "packyard-server: -distro only applies with -init")
+		os.Exit(2)
+	}
+	warnIgnoredData(*configPath, flagSet(flag.CommandLine, "data"))
 
 	cfg, err := resolveConfig(*configPath, *dataDir)
 	if err != nil {
@@ -97,6 +110,38 @@ func main() {
 	}
 }
 
+// flagSet reports whether the named flag was given explicitly.
+func flagSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
+// warnIgnoredData points out a -data that -config overrides, so a
+// mistyped invocation doesn't silently use the config's data_dir.
+func warnIgnoredData(configPath string, dataGiven bool) {
+	if configPath != "" && dataGiven {
+		fmt.Fprintln(os.Stderr, "packyard-server: warning: -data is ignored when -config is set; data_dir comes from the config file")
+	}
+}
+
+// defaultConfigFiles lists the default config files that belong in
+// the data dir: those whose path server.yaml doesn't point elsewhere.
+func defaultConfigFiles(cfg *config.ServerConfig) []string {
+	files := []string{}
+	if cfg.ChannelsFile == "" {
+		files = append(files, "channels.yaml")
+	}
+	if cfg.MatrixFile == "" {
+		files = append(files, "matrix.yaml")
+	}
+	return files
+}
+
 // resolveConfig produces a ServerConfig from either the YAML file at
 // configPath or the command-line fallbacks. If configPath is empty
 // every field comes from defaults overridden by the -data flag.
@@ -121,6 +166,7 @@ func runInit(cfg *config.ServerConfig, opts config.BootstrapOptions) error {
 		return fmt.Errorf("create data dir: %w", err)
 	}
 
+	opts.Files = defaultConfigFiles(cfg)
 	bootstrap, err := config.BootstrapDefaults(dataDir, opts)
 	if err != nil {
 		return fmt.Errorf("bootstrap default configs: %w", err)
@@ -204,10 +250,16 @@ func openDB(cfg *config.ServerConfig) (*db.DB, error) {
 // operator has to capture it. The companion /api/v1/admin/tokens
 // endpoint in A6 will do the same thing over HTTP.
 func runMintToken(cfg *config.ServerConfig, scopes, label string) error {
-	scopes = strings.TrimSpace(scopes)
-	if scopes == "" {
+	set := auth.ParseScopes(scopes)
+	if len(set) == 0 {
 		return fmt.Errorf("-scopes is required (e.g. 'publish:*,read:*,admin')")
 	}
+	for s := range set {
+		if !auth.ValidScope(s) {
+			return fmt.Errorf("invalid scope %q (want admin, or publish|read|yank:<channel> or :*)", s)
+		}
+	}
+	scopes = set.CSV()
 	if label == "" {
 		label = "cli-" + time.Now().UTC().Format("20060102-150405")
 	}
@@ -243,15 +295,15 @@ func runMintToken(cfg *config.ServerConfig, scopes, label string) error {
 // than serve a half-initialized request surface.
 func runServe(cfg *config.ServerConfig) error {
 	// Auto-bootstrap a fresh data dir so `docker run` / `docker compose
-	// up` Just Work against an empty volume. Only write defaults when
-	// the operator hasn't pointed -config at explicit file paths —
-	// otherwise we'd scatter unused default YAMLs next to the DB.
-	// BootstrapDefaults is idempotent: existing files are left alone.
+	// up` Just Work against an empty volume. Only the files that live in
+	// the data dir are written: a file server.yaml points elsewhere is
+	// the operator's to provide. BootstrapDefaults is idempotent: existing
+	// files are left alone.
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return fmt.Errorf("ensure data dir: %w", err)
 	}
-	if cfg.ChannelsFile == "" && cfg.MatrixFile == "" {
-		if _, err := config.BootstrapDefaults(cfg.DataDir, config.BootstrapOptions{}); err != nil {
+	if files := defaultConfigFiles(cfg); len(files) > 0 {
+		if _, err := config.BootstrapDefaults(cfg.DataDir, config.BootstrapOptions{Files: files}); err != nil {
 			return fmt.Errorf("bootstrap default configs: %w", err)
 		}
 	}
@@ -263,6 +315,11 @@ func runServe(cfg *config.ServerConfig) error {
 	channels, err := config.LoadChannels(cfg.ChannelsPath())
 	if err != nil {
 		return fmt.Errorf("load channels: %w", err)
+	}
+	// Validate the configs against each other before anything is
+	// written to the DB, so a bad config leaves it untouched.
+	if err := validateUpstreamCells(channels, matrix); err != nil {
+		return fmt.Errorf("config: %w", err)
 	}
 
 	database, err := openDB(cfg)
@@ -305,10 +362,6 @@ func runServe(cfg *config.ServerConfig) error {
 		return fmt.Errorf("ui session key: %w", err)
 	}
 
-	if err := validateUpstreamCells(channels, matrix); err != nil {
-		return fmt.Errorf("config: %w", err)
-	}
-
 	deps := api.Deps{
 		DB:              database,
 		CAS:             casStore,
@@ -333,6 +386,9 @@ func runServe(cfg *config.ServerConfig) error {
 		// the publish handler bounds the payload.
 	}
 
+	// SIGHUP would otherwise kill the process without draining (Go's
+	// default); config reloads need a restart, so it is ignored.
+	signal.Ignore(syscall.SIGHUP)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -369,7 +425,10 @@ func runServe(cfg *config.ServerConfig) error {
 		}
 		return nil
 	case <-ctx.Done():
-		slog.Info("shutdown signal received; draining")
+		// Restore default signal handling so a second Ctrl-C or
+		// SIGTERM ends the process instead of waiting out the drain.
+		stop()
+		slog.Info("shutdown signal received; draining (send again to force)")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -389,20 +448,24 @@ func runServe(cfg *config.ServerConfig) error {
 //
 //	healthcheck: ["CMD", "/usr/local/bin/packyard-server", "-healthcheck"]
 //
-// Without an explicit URL it probes 127.0.0.1 on the configured listen
-// port. Certificate verification is skipped for https: the probe
-// targets loopback, where the certificate's names never match.
+// Without an explicit URL it probes the listen address, using
+// 127.0.0.1 when the server listens on all interfaces. Certificate
+// verification is skipped for https: the probe targets the local
+// server by address, where the certificate's names rarely match.
 func runHealthcheck(cfg *config.ServerConfig, url string) error {
 	if url == "" {
-		_, port, err := net.SplitHostPort(cfg.Listen)
+		host, port, err := net.SplitHostPort(cfg.Listen)
 		if err != nil {
 			return fmt.Errorf("listen %q: %w", cfg.Listen, err)
+		}
+		if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+			host = "127.0.0.1"
 		}
 		scheme := "http"
 		if cfg.TLSEnabled() {
 			scheme = "https"
 		}
-		url = scheme + "://127.0.0.1:" + port + "/health"
+		url = scheme + "://" + net.JoinHostPort(host, port) + "/health"
 	}
 	client := &http.Client{
 		Timeout: 3 * time.Second,

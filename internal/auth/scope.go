@@ -17,13 +17,14 @@ import (
 	"strings"
 )
 
-// scopeRE matches an individual scope entry. Kept permissive enough to
-// accept the ones we ship (publish:dev, read:*, yank:test, admin) plus
-// hyphens and underscores for future-compat.
-var scopeRE = regexp.MustCompile(`^[a-z][a-z0-9_-]*(:([a-z0-9_*-]+))?$`)
+// scopeRE matches an individual scope entry: admin, or one of the
+// verbs the server checks with a channel-name target or the wildcard.
+// A typo such as "pubish:*" would otherwise be stored and grant
+// nothing, with no hint why.
+var scopeRE = regexp.MustCompile(`^(admin|(publish|read|yank):(\*|[a-z0-9][a-z0-9_-]*))$`)
 
-// ValidScope reports whether s is a well-formed scope. Checked
-// wherever scopes enter the DB, so bad ones never reach it.
+// ValidScope reports whether s is a scope the server understands.
+// Checked wherever scopes enter the DB, so bad ones never reach it.
 func ValidScope(s string) bool { return scopeRE.MatchString(s) }
 
 // Wildcard matches any target within a given verb, e.g. publish:*.

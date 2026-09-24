@@ -126,10 +126,12 @@ func gitClone(ctx context.Context, repoURL, branch, dest string) error {
 }
 
 // rCmdBuild shells out to R CMD build and returns the produced tarball
-// path. R writes the tarball into the CWD — we run in a temp dir and
-// then look for the single *.tar.gz.
+// path. R writes the tarball into the CWD, so it runs in a build/ dir
+// next to sourceDir: inside the importer's workdir, which the caller
+// removes, so the tarball doesn't outlive the import. R CMD build runs
+// code from the repository (vignettes), so only import repos you trust.
 func rCmdBuild(ctx context.Context, sourceDir string) (string, error) {
-	outDir, err := os.MkdirTemp("", "packyard-R-build-*")
+	outDir, err := os.MkdirTemp(filepath.Dir(sourceDir), "build-*")
 	if err != nil {
 		return "", err
 	}

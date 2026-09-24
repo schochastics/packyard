@@ -98,7 +98,9 @@ packyard-server admin -data ./data import git \
 
 Package name + version are parsed from `DESCRIPTION` before the build
 step so the output message is meaningful even if `R CMD build` fails.
-Temp clone and build dirs are cleaned up on exit.
+Temp clone and build dirs are cleaned up on exit. `R CMD build` runs
+code from the repository (it builds vignettes), so only import
+repositories you trust.
 
 ### `admin import bundle <path-or-targz> -channel <name>`
 
