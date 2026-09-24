@@ -3,16 +3,17 @@ package api
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 
 	"github.com/schochastics/packyard/internal/cas"
 	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/rversion"
 	"github.com/schochastics/packyard/internal/store"
 )
 
@@ -20,7 +21,7 @@ import (
 // largest R package we've seen in the wild (a few hundred MB for
 // Bioconductor heavyweights) while still blocking trivial DoS uploads.
 // Admins who need more can patch this; v1 doesn't expose it as config.
-const maxRequestBytes = 2 << 30
+var maxRequestBytes int64 = 2 << 30 // var so tests can lower it
 
 // maxManifestBytes is the limit on the manifest JSON part. Manifests
 // are small (a few cells × a few fields); anything over 1 MiB is
@@ -33,9 +34,12 @@ const maxManifestBytes = 1 << 20
 // deliberately malformed name can't slip into the DB or an event row.
 var packageNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9.]*[A-Za-z0-9]$`)
 
-// versionRE matches an R package version. R accepts dot- and
-// dash-separated numbers; we accept the same subset.
-var versionRE = regexp.MustCompile(`^[0-9][0-9.\-]*[0-9]$`)
+// validVersion reports whether v is a version R's package_version
+// accepts: at least two numeric components separated by dots or dashes.
+func validVersion(v string) bool {
+	_, err := rversion.Parse(v)
+	return err == nil
+}
 
 // Manifest is the JSON body carried in the "manifest" multipart part.
 // Clients describe their upload as:
@@ -111,7 +115,7 @@ func handlePublish(deps Deps) http.HandlerFunc {
 				"R package names start with a letter, contain letters/digits/dots, end alphanumeric")
 			return
 		}
-		if !versionRE.MatchString(version) {
+		if !validVersion(version) {
 			writeError(w, r, http.StatusBadRequest,
 				CodeBadRequest, "invalid version",
 				"versions must be numeric, dot- and dash-separated (e.g. 1.2.3 or 0.9-1)")
@@ -120,24 +124,9 @@ func handlePublish(deps Deps) http.HandlerFunc {
 		if !requireScope(w, r, "publish:"+channel) {
 			return
 		}
-		if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
-			writeError(w, r, http.StatusConflict,
-				CodeChannelIsProxy,
-				fmt.Sprintf("channel %q is a proxy; publish is not accepted", channel),
-				"Proxy channels materialize content from upstream. Pick a local channel for CI publishes.")
-			return
-		}
-
-		policy, ok, err := lookupChannelPolicy(r.Context(), deps.DB.DB, channel)
-		switch {
-		case err != nil:
-			writeError(w, r, http.StatusInternalServerError,
-				CodeInternal, "channel lookup failed", "see server logs")
-			return
-		case !ok:
-			writeError(w, r, http.StatusNotFound,
-				CodeNotFound, fmt.Sprintf("channel %q not found", channel),
-				"add the channel to channels.yaml and restart the server")
+		policy, herr := writableChannel(r.Context(), deps, channel, "publish")
+		if herr != nil {
+			herr.write(w, r)
 			return
 		}
 
@@ -174,10 +163,11 @@ func handlePublish(deps Deps) http.HandlerFunc {
 			deps.Index.InvalidateChannel(channel)
 		}
 
+		// The publish has committed; a failure here must not turn it into
+		// an error response the client would retry.
 		missing, err := missingCellsFor(r.Context(), deps, channel, name, version)
 		if err != nil {
-			internalErr("missing cells", err).write(w, r)
-			return
+			slog.Warn("publish: missing cells lookup failed", "channel", channel, "package", name, "err", err)
 		}
 		resp.MissingCells = missing
 
@@ -244,22 +234,6 @@ func recordPublishMetric(deps Deps, channel string, resp *PublishResponse) {
 	deps.Metrics.PublishTotal.WithLabelValues(channel, result).Inc()
 }
 
-// lookupChannelPolicy returns the overwrite_policy for a channel and a
-// present flag. An error here is a DB error, not an absent channel.
-func lookupChannelPolicy(ctx context.Context, db *sql.DB, name string) (string, bool, error) {
-	var policy string
-	err := db.QueryRowContext(ctx,
-		`SELECT overwrite_policy FROM channels WHERE name = ?`, name,
-	).Scan(&policy)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	return policy, true, nil
-}
-
 // publishViaStore is the HTTP-facing wrapper around
 // [store.Service.Materialize]. It translates a validated multipart
 // publish into the store's Input shape, runs the materialization, and
@@ -290,33 +264,25 @@ func publishViaStore(
 	}
 
 	res, err := svc.Materialize(ctx, in)
-	if err != nil {
-		if errors.Is(err, store.ErrImmutableConflict) {
-			return nil, &httpError{
-				status: http.StatusConflict,
-				code:   CodeVersionImmutable,
-				msg:    fmt.Sprintf("%s@%s already exists on immutable channel %s with different content", name, version, channel),
-				hint:   "bump the version, or republish with byte-identical content",
-			}
+	switch {
+	case errors.Is(err, store.ErrImmutableConflict):
+		return nil, &httpError{
+			status: http.StatusConflict,
+			code:   CodeVersionImmutable,
+			msg:    fmt.Sprintf("%s@%s already exists on immutable channel %s with different content", name, version, channel),
+			hint:   "bump the version, or republish with byte-identical content",
 		}
+	case errors.Is(err, store.ErrEquivalentVersion):
+		return nil, &httpError{
+			status: http.StatusConflict,
+			code:   CodeConflict,
+			msg:    err.Error(),
+			hint:   "publish under the spelling that is already there, or bump the version",
+		}
+	case err != nil:
 		return nil, internalErr("materialize", err)
 	}
-
-	resp := &PublishResponse{
-		Channel:        res.Channel,
-		Name:           res.Name,
-		Version:        res.Version,
-		SourceSHA256:   res.Source.SHA256,
-		SourceSize:     res.Source.Size,
-		AlreadyExisted: res.AlreadyExisted,
-		Overwritten:    res.Overwritten,
-	}
-	for _, b := range res.Binaries {
-		resp.Binaries = append(resp.Binaries, PublishedBinary{
-			Cell: b.Cell, SHA256: b.Blob.SHA256, Size: b.Blob.Size,
-		})
-	}
-	return resp, nil
+	return publishResponseFromStore(res), nil
 }
 
 // httpError is an error that already knows its HTTP representation.
@@ -411,12 +377,7 @@ func streamMultipartToCAS(r *http.Request, store *cas.Store) (Manifest, map[stri
 		sum, size, cerr := store.Write(part)
 		_ = part.Close()
 		if cerr != nil {
-			return Manifest{}, nil, &httpError{
-				status: http.StatusInternalServerError,
-				code:   CodeInternal,
-				msg:    "failed to write blob to CAS",
-				hint:   "see server logs",
-			}
+			return Manifest{}, nil, casWriteErr(cerr)
 		}
 		parts[name] = partRef{sha256: sum, size: size}
 	}
@@ -534,13 +495,34 @@ func nullIfEmpty(s string) any {
 	return s
 }
 
-// internalErr is a convenience wrapper that logs via the standard error
-// envelope and returns a pointer suitable for a handler's return site.
+// internalErr logs err and returns a generic 500 for the client. The
+// underlying error (SQL text, filesystem paths) stays in the log.
 func internalErr(what string, err error) *httpError {
+	slog.Error("internal error", "op", what, "err", err)
 	return &httpError{
 		status: http.StatusInternalServerError,
 		code:   CodeInternal,
-		msg:    what + ": " + err.Error(),
+		msg:    what + " failed",
 		hint:   "see server logs",
 	}
+}
+
+// casWriteErr maps a failed CAS write of an upload part. The request
+// body is what usually fails: the size limit (413) or a client that
+// went away mid-upload. Only a failure of the store itself is a 500.
+func casWriteErr(err error) *httpError {
+	var mbErr *http.MaxBytesError
+	if errors.As(err, &mbErr) {
+		return multipartErr(err)
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, context.Canceled) {
+		slog.Warn("upload aborted", "err", err)
+		return &httpError{
+			status: http.StatusBadRequest,
+			code:   CodeBadRequest,
+			msg:    "upload was cut off",
+			hint:   "the request body ended before the multipart part was complete",
+		}
+	}
+	return internalErr("write blob to CAS", err)
 }

@@ -41,7 +41,7 @@ func handleAttachBinary(deps Deps) http.HandlerFunc {
 		version := r.PathValue("version")
 		cell := r.PathValue("cell")
 
-		if !packageNameRE.MatchString(name) || !versionRE.MatchString(version) {
+		if !packageNameRE.MatchString(name) || !validVersion(version) {
 			writeError(w, r, http.StatusBadRequest, CodeBadRequest,
 				"invalid package name or version", "")
 			return
@@ -55,19 +55,9 @@ func handleAttachBinary(deps Deps) http.HandlerFunc {
 				"see /api/v1/cells for the list of configured cells")
 			return
 		}
-		if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
-			writeError(w, r, http.StatusConflict, CodeChannelIsProxy,
-				fmt.Sprintf("channel %q is a proxy; binaries are not accepted", channel), "")
-			return
-		}
-		policy, ok, err := lookupChannelPolicy(r.Context(), deps.DB.DB, channel)
-		switch {
-		case err != nil:
-			internalErr("channel lookup", err).write(w, r)
-			return
-		case !ok:
-			writeError(w, r, http.StatusNotFound, CodeNotFound,
-				fmt.Sprintf("channel %q not found", channel), "")
+		policy, herr := writableChannel(r.Context(), deps, channel, "binary upload")
+		if herr != nil {
+			herr.write(w, r)
 			return
 		}
 
@@ -174,7 +164,7 @@ func readSinglePart(r *http.Request, deps Deps, want string) (store.BlobRef, *ht
 			if errors.As(cerr, &mbErr) {
 				return store.BlobRef{}, multipartErr(cerr)
 			}
-			return store.BlobRef{}, internalErr("write blob to CAS", cerr)
+			return store.BlobRef{}, casWriteErr(cerr)
 		}
 		blob, seen = store.BlobRef{SHA256: sum, Size: size}, true
 	}
@@ -200,6 +190,10 @@ type ListMissingBinariesResponse struct {
 	Missing []MissingBinary `json:"missing"`
 }
 
+// ErrUnknownCell is returned by [MissingBinaries] for a cell filter
+// that matrix.yaml doesn't declare.
+var ErrUnknownCell = errors.New("cell is not declared in matrix.yaml")
+
 // MissingBinaries lists, for the current version of every package in
 // channel (the one PACKAGES serves), each matrix cell without a
 // binary. cell restricts the result to one cell ("" = all). Archived
@@ -212,7 +206,7 @@ func MissingBinaries(ctx context.Context, deps Deps, channel, cell string) ([]Mi
 	if cell != "" {
 		c := deps.Matrix.Lookup(cell)
 		if c == nil {
-			return nil, fmt.Errorf("cell %q is not declared in matrix.yaml", cell)
+			return nil, fmt.Errorf("%w: %q", ErrUnknownCell, cell)
 		}
 		cells = []config.Cell{*c}
 	}
@@ -257,9 +251,13 @@ func handleListMissingBinaries(deps Deps) http.HandlerFunc {
 			return
 		}
 		missing, err := MissingBinaries(r.Context(), deps, channel, r.URL.Query().Get("cell"))
-		if err != nil {
+		switch {
+		case errors.Is(err, ErrUnknownCell):
 			writeError(w, r, http.StatusBadRequest, CodeBadRequest, err.Error(),
 				"see /api/v1/cells for the list of configured cells")
+			return
+		case err != nil:
+			internalErr("list missing binaries", err).write(w, r)
 			return
 		}
 		writeJSON(w, r, http.StatusOK, ListMissingBinariesResponse{Channel: channel, Missing: missing})

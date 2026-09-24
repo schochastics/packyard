@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/schochastics/packyard/internal/config"
+	"github.com/schochastics/packyard/internal/rversion"
 )
 
 // BlobRef is the result of writing one tarball to CAS — the
@@ -105,6 +106,12 @@ type AttachResult struct {
 // the write would change bytes on an immutable channel.
 var ErrImmutableConflict = errors.New("immutable channel already has this version with different content")
 
+// ErrEquivalentVersion is returned by Materialize when the channel
+// already holds the package under a different spelling of the same R
+// version ("1.0" vs "1.0.0", "1.0-1" vs "1.0.1"). R treats them as one
+// version, so PACKAGES could only ever show one of them.
+var ErrEquivalentVersion = errors.New("an equivalent version is already published")
+
 // ErrSourceRowMissing is returned by AttachBinary when the package row
 // referenced by the input does not exist. The bundle importer surfaces
 // this so operators see a clear error if they try to import a binary
@@ -148,8 +155,10 @@ func (s *Service) WriteBlob(r io.Reader) (BlobRef, error) {
 // Behavior by (existing-row, policy):
 //
 //   - no existing row              → INSERT packages + binaries, emit "publish"
-//   - existing + immutable + same  → no-op, emit "publish_idempotent",
-//     Result.AlreadyExisted=true
+//   - existing + immutable + same  → emit "publish_idempotent",
+//     Result.AlreadyExisted=true; binaries in the input follow
+//     AttachBinary rules (absent cell → inserted, same bytes → no-op,
+//     different bytes → ErrImmutableConflict)
 //   - existing + immutable + diff  → return ErrImmutableConflict, no DB change
 //   - existing + mutable           → UPDATE packages, replace binaries, emit
 //     "publish_overwrite", Result.Overwritten=true
@@ -204,6 +213,12 @@ func (s *Service) Materialize(ctx context.Context, in Input) (*Result, error) {
 	var eventType string
 	switch {
 	case !exists:
+		if other, err := equivalentVersion(ctx, tx, in); err != nil {
+			return nil, err
+		} else if other != "" {
+			return nil, fmt.Errorf("%w: %s@%s on channel %s is the same R version as %s",
+				ErrEquivalentVersion, in.Name, other, in.Channel, in.Version)
+		}
 		if err := insertPackageAndBinaries(ctx, tx, in, fields, built, now); err != nil {
 			return nil, fmt.Errorf("insert package: %w", err)
 		}
@@ -214,9 +229,13 @@ func (s *Service) Materialize(ctx context.Context, in Input) (*Result, error) {
 			return nil, fmt.Errorf("%w: %s@%s on channel %s",
 				ErrImmutableConflict, in.Name, in.Version, in.Channel)
 		}
-		// Idempotent replay on immutable: no DB write beyond the event.
-		// Binaries are not touched here — to add a cell to an existing
-		// immutable version, use AttachBinary.
+		// Idempotent replay on immutable. A replay that carries binaries
+		// (CI re-running a publish with a cell that failed last time)
+		// gets the same rules as AttachBinary, so the response never
+		// claims a binary the DB doesn't have.
+		if err := replayBinaries(ctx, tx, existingID, in, built, now); err != nil {
+			return nil, err
+		}
 		result.AlreadyExisted = true
 		eventType = "publish_idempotent"
 
@@ -273,12 +292,20 @@ func (s *Service) AttachBinary(ctx context.Context, in AttachInput) (*AttachResu
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	built := s.builtField(in.Binary.SHA256, in.Name)
 
+	// The package row is read inside the write transaction so a
+	// concurrent delete can't slip in between the read and the insert.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var (
 		packageID  int64
 		sourceSHA  string
 		sourceSize int64
 	)
-	err := s.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		SELECT id, source_sha256, source_size FROM packages
 		WHERE channel = ? AND name = ? AND version = ?
 	`, in.Channel, in.Name, in.Version).Scan(&packageID, &sourceSHA, &sourceSize)
@@ -298,12 +325,6 @@ func (s *Service) AttachBinary(ctx context.Context, in AttachInput) (*AttachResu
 		Cell:         in.Cell,
 		Binary:       in.Binary,
 	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 
 	var existingSHA string
 	row := tx.QueryRowContext(ctx,
@@ -356,6 +377,51 @@ func (s *Service) AttachBinary(ctx context.Context, in AttachInput) (*AttachResu
 		return nil, fmt.Errorf("commit: %w", err)
 	}
 	return result, nil
+}
+
+// equivalentVersion returns an existing version of in.Name in
+// in.Channel that R considers equal to in.Version, or "".
+func equivalentVersion(ctx context.Context, tx *sql.Tx, in Input) (string, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT version FROM packages WHERE channel = ? AND name = ?`, in.Channel, in.Name)
+	if err != nil {
+		return "", fmt.Errorf("read versions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return "", err
+		}
+		if v != in.Version && rversion.Compare(v, in.Version) == 0 {
+			return v, nil
+		}
+	}
+	return "", rows.Err()
+}
+
+// replayBinaries inserts the binaries of an idempotent immutable replay
+// whose cell is still absent and rejects any whose bytes differ from
+// the stored binary.
+func replayBinaries(ctx context.Context, tx *sql.Tx, packageID int64, in Input, built map[string]string, now string) error {
+	for _, b := range in.Binaries {
+		var existing string
+		err := tx.QueryRowContext(ctx,
+			`SELECT binary_sha256 FROM binaries WHERE package_id = ? AND cell = ?`,
+			packageID, b.Cell).Scan(&existing)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			if err := insertBinariesFor(ctx, tx, packageID, []BinaryInput{b}, built, now); err != nil {
+				return fmt.Errorf("insert binary: %w", err)
+			}
+		case err != nil:
+			return fmt.Errorf("read existing binary: %w", err)
+		case existing != b.Blob.SHA256:
+			return fmt.Errorf("%w: %s@%s on channel %s, cell %s",
+				ErrImmutableConflict, in.Name, in.Version, in.Channel, b.Cell)
+		}
+	}
+	return nil
 }
 
 func insertPackageAndBinaries(ctx context.Context, tx *sql.Tx, in Input, fields string, built map[string]string, now string) error {

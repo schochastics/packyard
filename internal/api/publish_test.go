@@ -448,3 +448,110 @@ func TestPublishVersionMismatchInManifestReturns400(t *testing.T) {
 	}
 	fmt.Println(rec.Body.String()) // useful when the test tweaks the message
 }
+
+// Not parallel: it lowers the package-level upload limit, and parallel
+// tests only start once every sequential test has finished.
+func TestPublishOversizedBodyReturns413(t *testing.T) {
+	orig := maxRequestBytes
+	maxRequestBytes = 4096
+	t.Cleanup(func() { maxRequestBytes = orig })
+
+	fx := newPublishFixture(t)
+	body, ct := buildPublishBody(t, map[string]any{"source": "source"},
+		publishPart{name: "source", body: bytes.Repeat([]byte("x"), 16<<10)})
+	rec := doPublish(t, fx, "dev", "mypkg", "1.0.0", fx.token, body, ct)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPublishToChannelRemovedFromConfigReturns404(t *testing.T) {
+	t.Parallel()
+	fx := newPublishFixture(t)
+	cfg, err := config.DecodeChannels(strings.NewReader(`
+channels:
+  - name: prod
+    overwrite_policy: immutable
+    default: true
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx.deps.Channels = cfg
+	fx.mux = NewMux(fx.deps)
+
+	body, ct := buildPublishBody(t, map[string]any{"source": "source"},
+		publishPart{name: "source", body: []byte("src")})
+	rec := doPublish(t, fx, "dev", "mypkg", "1.0.0", fx.token, body, ct)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "no longer in channels.yaml") {
+		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Republishing an immutable version with a binary for a cell it lacks
+// stores the binary, so the response's binaries and missing_cells agree.
+func TestPublishImmutableReplayAddsMissingBinary(t *testing.T) {
+	t.Parallel()
+	fx := newPublishFixture(t)
+	src := []byte("same source")
+	body, ct := buildPublishBody(t, map[string]any{"source": "source"},
+		publishPart{name: "source", body: src})
+	if rec := doPublish(t, fx, "prod", "mypkg", "1.0.0", fx.token, body, ct); rec.Code != http.StatusCreated {
+		t.Fatalf("first publish: %d %s", rec.Code, rec.Body.String())
+	}
+
+	body, ct = buildPublishBody(t, map[string]any{
+		"source":   "source",
+		"binaries": []map[string]string{{"cell": "r-4.4", "part": "bin"}},
+	}, publishPart{name: "source", body: src}, publishPart{name: "bin", body: []byte("binary")})
+	rec := doPublish(t, fx, "prod", "mypkg", "1.0.0", fx.token, body, ct)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("replay: %d %s", rec.Code, rec.Body.String())
+	}
+	var resp PublishResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.AlreadyExisted || len(resp.MissingCells) != 1 || resp.MissingCells[0] != "r-4.5" {
+		t.Errorf("replay response = %+v", resp)
+	}
+}
+
+func TestPublishRejectsVersionsRWouldReject(t *testing.T) {
+	t.Parallel()
+	fx := newPublishFixture(t)
+	for _, v := range []string{"12", "1..0", "1.-0"} {
+		body, ct := buildPublishBody(t, map[string]any{"source": "source"},
+			publishPart{name: "source", body: []byte("src")})
+		if rec := doPublish(t, fx, "dev", "mypkg", v, fx.token, body, ct); rec.Code != http.StatusBadRequest {
+			t.Errorf("version %q: status %d, want 400", v, rec.Code)
+		}
+	}
+}
+
+func TestPublishEquivalentVersionReturns409(t *testing.T) {
+	t.Parallel()
+	fx := newPublishFixture(t)
+	seedPublished(t, fx, "dev", "mypkg", "1.0")
+	body, ct := buildPublishBody(t, map[string]any{"source": "source"},
+		publishPart{name: "source", body: []byte("src 1.0.0")})
+	rec := doPublish(t, fx, "dev", "mypkg", "1.0.0", fx.token, body, ct)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "same R version") {
+		t.Fatalf("status = %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestImportSourceRejectsProxyChannel(t *testing.T) {
+	t.Parallel()
+	fx := newPublishFixture(t)
+	if _, err := fx.deps.DB.ExecContext(context.Background(),
+		`INSERT INTO channels(name, overwrite_policy, kind, upstream_url) VALUES ('cran', 'immutable', 'proxy', 'https://cloud.r-project.org')`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ImportSource(context.Background(), fx.deps, ImportInput{
+		Channel: "cran", Name: "mypkg", Version: "1.0.0", Source: strings.NewReader("src"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "is a proxy") {
+		t.Fatalf("import into proxy channel: err = %v", err)
+	}
+}

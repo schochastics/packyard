@@ -681,6 +681,14 @@ func openAdminDeps(cfg *config.ServerConfig) (api.Deps, func(), error) {
 		fmt.Fprintf(os.Stderr, "warning: matrix: %v\n", err)
 	}
 
+	// Loaded so writes refuse channels removed from channels.yaml, as
+	// the server does. Kind (proxy or local) comes from the DB either way.
+	channels, err := config.LoadChannels(cfg.ChannelsPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: channels: %v\n", err)
+		channels = nil
+	}
+
 	database, err := openExistingDB(cfg)
 	if err != nil {
 		return api.Deps{}, nil, err
@@ -692,7 +700,7 @@ func openAdminDeps(cfg *config.ServerConfig) (api.Deps, func(), error) {
 	}
 
 	cleanup := func() { _ = database.Close() }
-	return api.Deps{DB: database, CAS: store, Matrix: matrix, Server: cfg}, cleanup, nil
+	return api.Deps{DB: database, CAS: store, Matrix: matrix, Channels: channels, Server: cfg}, cleanup, nil
 }
 
 // reorderFlagsFirst moves every -flag and -flag=value / -flag value

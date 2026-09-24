@@ -31,7 +31,7 @@ func handleDelete(deps Deps) http.HandlerFunc {
 		name := r.PathValue("name")
 		version := r.PathValue("version")
 
-		if !packageNameRE.MatchString(name) || !versionRE.MatchString(version) {
+		if !packageNameRE.MatchString(name) || !validVersion(version) {
 			writeError(w, r, http.StatusBadRequest,
 				CodeBadRequest, "invalid package name or version", "")
 			return
@@ -39,11 +39,8 @@ func handleDelete(deps Deps) http.HandlerFunc {
 		if !requireScope(w, r, "publish:"+channel) {
 			return
 		}
-		if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
-			writeError(w, r, http.StatusConflict,
-				CodeChannelIsProxy,
-				fmt.Sprintf("channel %q is a proxy; delete is not accepted", channel),
-				"Proxy channels mirror upstream; delete a proxied package by removing the channel itself.")
+		if _, herr := writableChannel(r.Context(), deps, channel, "delete"); herr != nil {
+			herr.write(w, r)
 			return
 		}
 

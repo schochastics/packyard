@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 
 	"github.com/schochastics/packyard/internal/store"
 )
@@ -57,16 +58,13 @@ func ImportSource(ctx context.Context, deps Deps, in ImportInput) (*PublishRespo
 	if !packageNameRE.MatchString(in.Name) {
 		return nil, fmt.Errorf("invalid package name %q", in.Name)
 	}
-	if !versionRE.MatchString(in.Version) {
+	if !validVersion(in.Version) {
 		return nil, fmt.Errorf("invalid version %q", in.Version)
 	}
 
-	policy, ok, err := lookupChannelPolicy(ctx, deps.DB.DB, in.Channel)
-	if err != nil {
-		return nil, fmt.Errorf("channel lookup: %w", err)
-	}
-	if !ok {
-		return nil, fmt.Errorf("channel %q not found", in.Channel)
+	policy, herr := writableChannel(ctx, deps, in.Channel, "import")
+	if herr != nil {
+		return nil, herr
 	}
 
 	svc := storeService(deps)
@@ -84,12 +82,7 @@ func ImportSource(ctx context.Context, deps Deps, in ImportInput) (*PublishRespo
 		Actor:   in.Actor,
 	})
 	if err != nil {
-		// Map the store-layer error to a sentinel CLI callers can
-		// switch on. Other errors flow through unchanged.
-		if errors.Is(err, store.ErrImmutableConflict) {
-			return nil, err // already wraps ErrImmutableConflict
-		}
-		return nil, err
+		return nil, err // ErrImmutableConflict passes through wrapped
 	}
 
 	if deps.Index != nil && !res.AlreadyExisted {
@@ -108,7 +101,7 @@ func ImportSource(ctx context.Context, deps Deps, in ImportInput) (*PublishRespo
 			VALUES ('import', ?, ?, ?, ?, ?)
 		`, nullIfEmpty(in.Actor), in.Channel, in.Name, in.Version, in.Note); err != nil {
 			// Intentionally not fatal; the publish itself succeeded.
-			return resp, nil
+			slog.Warn("import: annotation event failed", "channel", in.Channel, "package", in.Name, "err", err)
 		}
 	}
 
@@ -158,7 +151,7 @@ func AttachBinaries(ctx context.Context, deps Deps, in AttachInput) (*PublishRes
 	if !packageNameRE.MatchString(in.Name) {
 		return nil, fmt.Errorf("invalid package name %q", in.Name)
 	}
-	if !versionRE.MatchString(in.Version) {
+	if !validVersion(in.Version) {
 		return nil, fmt.Errorf("invalid version %q", in.Version)
 	}
 	if in.Cell == "" {
@@ -171,12 +164,9 @@ func AttachBinaries(ctx context.Context, deps Deps, in AttachInput) (*PublishRes
 		return nil, fmt.Errorf("cell %q is not declared in matrix.yaml", in.Cell)
 	}
 
-	policy, ok, err := lookupChannelPolicy(ctx, deps.DB.DB, in.Channel)
-	if err != nil {
-		return nil, fmt.Errorf("channel lookup: %w", err)
-	}
-	if !ok {
-		return nil, fmt.Errorf("channel %q not found", in.Channel)
+	policy, herr := writableChannel(ctx, deps, in.Channel, "import")
+	if herr != nil {
+		return nil, herr
 	}
 
 	svc := storeService(deps)

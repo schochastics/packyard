@@ -321,7 +321,7 @@ func parseSourceTarballFilename(file string) (name, version string, ok bool) {
 	}
 	name = base[:i]
 	version = base[i+1:]
-	if !packageNameRE.MatchString(name) || !versionRE.MatchString(version) {
+	if !packageNameRE.MatchString(name) || !validVersion(version) {
 		return "", "", false
 	}
 	return name, version, true

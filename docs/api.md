@@ -58,7 +58,7 @@ always carry this envelope.
 | `conflict` | 409 | General conflict not covered by a more specific code. |
 | `version_immutable` | 409 | Re-publishing the same `(channel, name, version)` on an immutable channel with different bytes. |
 | `channel_immutable` | 409 | Delete attempt on an immutable channel; bump the version instead. |
-| `payload_too_large` | 413 | Request body exceeded 2 GiB or the manifest part exceeded 1 MiB. |
+| `payload_too_large` | 413 | Request body exceeded 2 GiB. (An oversized manifest part is a 400.) |
 | `internal_error` | 500 | Server-side failure; see logs + `request_id`. |
 | `unavailable` | 503 | One or more subsystems failed their health probe; see `/health`. |
 
@@ -227,17 +227,27 @@ curl --fail-with-body -X POST \
 ```
 
 Required scope: `publish:<channel>`. Response is JSON with
-`source_sha256`, `source_size`, a `binaries` array, and `created` /
+`source_sha256`, `source_size`, a `binaries` array, and
 `overwritten` / `already_existed` flags so CI can tell at a glance what
-the server did. `missing_cells` lists the matrix cells still without a
+the server did (neither set: a new version, status 201). `missing_cells` lists the matrix cells still without a
 binary for this version. Publishing with binaries for only some cells
 is fine; attach the rest later (below).
 
 Behavior by channel policy:
 
-- **mutable** — always replaces, reports `overwritten: true`.
+- **mutable** — replaces an existing version (binaries included),
+  reports `overwritten: true`.
 - **immutable, same bytes** — 200, `already_existed: true` (idempotent).
+  Binaries in the request follow the attach rules below: a cell
+  without a binary gets it, the same bytes are a no-op, different
+  bytes are a 409.
 - **immutable, different bytes** — 409 `version_immutable`.
+
+Also refused: a version R's `package_version` rejects (400), a second
+spelling of an already published version such as `1.0` next to
+`1.0.0` (409 `conflict`, since R treats them as one version), and a
+channel that is still in the database but was removed from
+`channels.yaml` (404).
 
 Size caps: 2 GiB total request body; 1 MiB manifest part.
 

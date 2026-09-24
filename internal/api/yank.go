@@ -38,7 +38,7 @@ func handleYank(deps Deps) http.HandlerFunc {
 		name := r.PathValue("name")
 		version := r.PathValue("version")
 
-		if !packageNameRE.MatchString(name) || !versionRE.MatchString(version) {
+		if !packageNameRE.MatchString(name) || !validVersion(version) {
 			writeError(w, r, http.StatusBadRequest,
 				CodeBadRequest, "invalid package name or version", "")
 			return
@@ -46,11 +46,8 @@ func handleYank(deps Deps) http.HandlerFunc {
 		if !requireScope(w, r, "yank:"+channel) {
 			return
 		}
-		if meta := lookupChannelMeta(r.Context(), deps, channel); meta.IsProxy() {
-			writeError(w, r, http.StatusConflict,
-				CodeChannelIsProxy,
-				fmt.Sprintf("channel %q is a proxy; yank is not accepted", channel),
-				"Proxy channels mirror upstream; yank an upstream version at the upstream itself.")
+		if _, herr := writableChannel(r.Context(), deps, channel, "yank"); herr != nil {
+			herr.write(w, r)
 			return
 		}
 
