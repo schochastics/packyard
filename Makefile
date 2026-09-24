@@ -29,9 +29,9 @@ lint: ## Run golangci-lint (installs if missing)
 	}
 	golangci-lint run ./...
 
-# v0.29.0 is the newest vacuum that builds with the pinned go 1.25.0
-# (v0.30.x needs 1.25.7+, v0.30.5+ needs 1.26); bump with the toolchain.
-VACUUM_VERSION ?= v0.29.0
+# Pinned so a vacuum release needing a newer Go than go.mod can't
+# break the lint (CI runs with GOTOOLCHAIN=local); bump with the toolchain.
+VACUUM_VERSION ?= v0.30.6
 
 openapi-lint: ## Lint openapi/openapi.yaml with vacuum (installs if missing)
 	@command -v vacuum >/dev/null 2>&1 || { \

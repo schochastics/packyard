@@ -58,7 +58,7 @@ echo "$ADMIN"
 
 ## From source
 
-Needs Go 1.25+ installed. Everything runs under a throwaway `./tmpdata/`
+Needs Go 1.26+ installed. Everything runs under a throwaway `./tmpdata/`
 dir so it won't collide with an existing packyard install.
 
 ### 1. Build and start packyard

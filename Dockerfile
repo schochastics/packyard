@@ -7,7 +7,7 @@
 # Runs on the build host's platform and cross-compiles for the target,
 # so multi-arch builds (buildx --platform linux/amd64,linux/arm64) need
 # no emulation.
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 
 # git is only needed to resolve git describe during the build, and ca-certificates
 # so go get/mod can speak TLS. Everything else we need is in the base image.

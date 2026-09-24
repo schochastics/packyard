@@ -15,10 +15,6 @@ updates:
 
   - package-ecosystem: gomod
     directory: /
-    # x/sync >= 0.21 requires go 1.26; the module pins 1.25.0 (see
-    # CLAUDE.md). Drop this when the toolchain moves.
-    ignore:
-      - dependency-name: golang.org/x/sync
     schedule:
       interval: weekly
     commit-message:
