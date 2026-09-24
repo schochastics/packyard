@@ -127,8 +127,9 @@ Response:
 
 #### `GET /api/v1/admin/tokens`
 
-Lists tokens (no plaintext, no sha). `last_used_at` is updated on every
-authenticated request that resolves to this token. `source` is `api`
+Lists tokens (no plaintext, no sha). `last_used_at` is updated when an
+authenticated request resolves to this token, at most once a minute
+per token. `source` is `api`
 for minted tokens and `config` for tokens from `server.yaml` `tokens:`.
 
 #### `DELETE /api/v1/admin/tokens/{id}`

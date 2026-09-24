@@ -44,6 +44,12 @@ type Index struct {
 
 	mu      sync.Mutex
 	entries map[string]indexEntry
+	// gens counts invalidations per channel. A reader notes the
+	// generation before querying the DB and stores its result only if
+	// no invalidation happened meanwhile; otherwise a publish that
+	// commits during a rebuild would be followed by the old body being
+	// cached for a full TTL.
+	gens map[string]uint64
 }
 
 type indexEntry struct {
@@ -59,6 +65,7 @@ func NewIndex(db *sql.DB) *Index {
 		db:      db,
 		ttl:     5 * time.Minute,
 		entries: map[string]indexEntry{},
+		gens:    map[string]uint64{},
 	}
 }
 
@@ -113,12 +120,13 @@ func (i *Index) GetLinux(ctx context.Context, channel string, cell *config.Cell,
 	if body, ok := i.lookup(key); ok {
 		return body, false, nil
 	}
+	gen := i.generation(channel)
 	rows, err := i.latestRows(ctx, channel, cellName)
 	if err != nil {
 		return nil, false, err
 	}
 	body = formatPackages(rows, cell, arch)
-	i.storeWithTTL(key, body, i.ttl)
+	i.storeIfCurrent(key, channel, gen, body)
 	return body, false, nil
 }
 
@@ -127,11 +135,12 @@ func (i *Index) getSourceLocal(ctx context.Context, channel string) ([]byte, err
 	if body, ok := i.lookup(key); ok {
 		return body, nil
 	}
+	gen := i.generation(channel)
 	body, err := i.buildSource(ctx, channel)
 	if err != nil {
 		return nil, err
 	}
-	i.storeWithTTL(key, body, i.ttl)
+	i.storeIfCurrent(key, channel, gen, body)
 	return body, nil
 }
 
@@ -175,6 +184,7 @@ type upstreamView = config.UpstreamConfig
 func (i *Index) InvalidateChannel(channel string) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	i.gens[channel]++
 	prefix := channelKeyPrefix(channel)
 	for k := range i.entries {
 		if strings.HasPrefix(k, prefix) {
@@ -183,12 +193,22 @@ func (i *Index) InvalidateChannel(channel string) {
 	}
 }
 
-// InvalidateAll wipes the cache. Exposed for future /admin/reindex
-// use and for tests.
-func (i *Index) InvalidateAll() {
+// generation returns channel's invalidation count; see Index.gens.
+func (i *Index) generation(channel string) uint64 {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	i.entries = map[string]indexEntry{}
+	return i.gens[channel]
+}
+
+// storeIfCurrent caches a locally built body unless channel was
+// invalidated since gen was read.
+func (i *Index) storeIfCurrent(key, channel string, gen uint64, body []byte) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.gens[channel] != gen {
+		return
+	}
+	i.entries[key] = indexEntry{body: body, expires: time.Now().Add(i.ttl)}
 }
 
 func (i *Index) lookup(key string) ([]byte, bool) {
@@ -361,11 +381,12 @@ func (i *Index) GetArchive(ctx context.Context, channel string) ([]byte, error) 
 	if body, ok := i.lookup(key); ok {
 		return body, nil
 	}
+	gen := i.generation(channel)
 	body, err := i.buildArchive(ctx, channel)
 	if err != nil {
 		return nil, err
 	}
-	i.storeWithTTL(key, body, i.ttl)
+	i.storeIfCurrent(key, channel, gen, body)
 	return body, nil
 }
 

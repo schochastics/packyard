@@ -277,3 +277,32 @@ func TestInvalidateChannelDropsLinuxViews(t *testing.T) {
 		t.Errorf("linux view not invalidated: %q", body)
 	}
 }
+
+// A body built from a DB read that raced with an invalidation must not
+// be cached: the next reader has to see the post-invalidation state.
+func TestIndexDropsBodyBuiltBeforeInvalidation(t *testing.T) {
+	t.Parallel()
+	idx := NewIndex(nil)
+	key := sourceKey("dev")
+
+	gen := idx.generation("dev")
+	idx.InvalidateChannel("dev") // a publish commits mid-rebuild
+	idx.storeIfCurrent(key, "dev", gen, []byte("stale"))
+	if _, ok := idx.lookup(key); ok {
+		t.Fatal("body built before the invalidation was cached")
+	}
+
+	gen = idx.generation("dev")
+	idx.storeIfCurrent(key, "dev", gen, []byte("fresh"))
+	if body, ok := idx.lookup(key); !ok || string(body) != "fresh" {
+		t.Fatalf("current body not cached: %q %v", body, ok)
+	}
+
+	// Other channels are unaffected.
+	other := idx.generation("prod")
+	idx.InvalidateChannel("dev")
+	idx.storeIfCurrent(sourceKey("prod"), "prod", other, []byte("p"))
+	if _, ok := idx.lookup(sourceKey("prod")); !ok {
+		t.Error("invalidating dev dropped a prod rebuild")
+	}
+}

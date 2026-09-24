@@ -84,3 +84,20 @@ func truncate(s string, n int) string {
 	}
 	return s
 }
+
+func TestMetricsFoldsUnknownMethods(t *testing.T) {
+	t.Parallel()
+
+	fx := newPublishFixture(t)
+	for _, m := range []string{"FOO1", "FOO2", "BREW"} {
+		req := httptest.NewRequest(m, "/health", nil)
+		fx.mux.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	body := doGet(t, fx, "/metrics", "").Body.String()
+	if strings.Contains(body, "FOO1") || strings.Contains(body, "BREW") {
+		t.Errorf("arbitrary method became a label value: %s", truncate(body, 400))
+	}
+	if !strings.Contains(body, `method="other"`) {
+		t.Errorf(`method="other" missing: %s`, truncate(body, 400))
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/schochastics/packyard/internal/store"
 	"github.com/schochastics/packyard/internal/upstream"
@@ -120,7 +122,7 @@ func serveSourcePackages(w http.ResponseWriter, r *http.Request, deps Deps, chan
 // writeIndexBody writes a PACKAGES body, gzipped for PACKAGES.gz.
 func writeIndexBody(w http.ResponseWriter, r *http.Request, body []byte, gzipped bool) {
 	if gzipped {
-		gz, err := gzipBytes(body)
+		gz, err := gzipIndexBody(body)
 		if err != nil {
 			writeError(w, r, http.StatusInternalServerError,
 				CodeInternal, "gzip: "+err.Error(), "")
@@ -440,6 +442,38 @@ func requireReadScope(w http.ResponseWriter, r *http.Request, deps Deps, channel
 // gzipBytes is a one-shot compressor. The inputs are small (a few KB
 // to a few MB of PACKAGES text), so the whole-in-memory approach is
 // fine and simpler than streaming.
+// gzCache memoizes gzipped index bodies by content hash. R asks for
+// PACKAGES.gz on every install, and a proxy channel's CRAN index is
+// several MB: hashing it is far cheaper than recompressing it. The
+// cache holds only the few bodies currently being served.
+var gzCache = struct {
+	sync.Mutex
+	m map[[sha256.Size]byte][]byte
+}{m: map[[sha256.Size]byte][]byte{}}
+
+const gzCacheMax = 64
+
+func gzipIndexBody(body []byte) ([]byte, error) {
+	key := sha256.Sum256(body)
+	gzCache.Lock()
+	gz, ok := gzCache.m[key]
+	gzCache.Unlock()
+	if ok {
+		return gz, nil
+	}
+	gz, err := gzipBytes(body)
+	if err != nil {
+		return nil, err
+	}
+	gzCache.Lock()
+	if len(gzCache.m) >= gzCacheMax {
+		clear(gzCache.m) // crude, but bodies change rarely
+	}
+	gzCache.m[key] = gz
+	gzCache.Unlock()
+	return gz, nil
+}
+
 func gzipBytes(body []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
