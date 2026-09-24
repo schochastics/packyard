@@ -45,6 +45,7 @@ func adminMain(args []string) error {
 	if len(rest) == 0 {
 		return adminUsageError("admin: missing verb after flags")
 	}
+	warnIgnoredData(*configPath, flagSet(fs, "data"))
 
 	cfg, err := resolveConfig(*configPath, *dataDir)
 	if err != nil {

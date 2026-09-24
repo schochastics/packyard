@@ -297,6 +297,8 @@ Every config file, including token secret files, is re-read at server
 start. There is no hot-reload; SIGHUP is ignored. The reconcile logic is deliberately
 simple: channels added, same channels are updated in place (policy or
 default-flag changes apply), channels removed from YAML are NOT
-removed from the DB. Start with a known-good YAML, restart once,
+removed from the DB. Their packages stay readable, but publish, yank,
+delete and imports into them are refused until the channel is back in
+`channels.yaml`. Start with a known-good YAML, restart once,
 check `packyard-server admin channels list` before shutting the old
 server down.

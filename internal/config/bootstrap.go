@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // defaultConfigFS holds the channels.yaml and matrix.yaml that ship
@@ -31,6 +32,9 @@ type BootstrapOptions struct {
 	// Distro replaces the default matrix.yaml distro ("jammy"). Empty
 	// keeps the default.
 	Distro string
+	// Files restricts the pass to these default file names
+	// ("channels.yaml", "matrix.yaml"). Nil writes every default.
+	Files []string
 }
 
 // defaultDistroLine is the line in defaults/matrix.yaml that
@@ -63,6 +67,9 @@ func BootstrapDefaults(dataDir string, opts BootstrapOptions) (BootstrapResult, 
 
 	for _, e := range entries {
 		if e.IsDir() {
+			continue
+		}
+		if opts.Files != nil && !slices.Contains(opts.Files, e.Name()) {
 			continue
 		}
 		dst := filepath.Join(dataDir, e.Name())
