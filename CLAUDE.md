@@ -89,8 +89,8 @@ behaviour. `ghcr.io/schochastics/packyard:1.2.0` works;
 
 - **Home is `github.com/schochastics/packyard`** (`origin`). The repo
   briefly lived on gitea.cynkra.com (Sept 2026, module path
-  `gitea.cynkra.com/david.schoch/packyard`); that was rolled back, and
-  the old remote is kept as `gitea`.
+  `gitea.cynkra.com/david.schoch/packyard`); that was rolled back and the
+  Gitea repo deleted.
 
 - **Direct push to `main` is blocked in this environment.** After
   committing, report the commit SHA and wait for the user to push.

@@ -1,8 +1,10 @@
-# Packyard: implementation plan for internal-package hosting (v1.3 / v1.4)
+# Packyard: implementation plan for internal-package hosting
+
+> **Status (Sept 2026): done.** Phases 0–7 all shipped together in **v1.2.0**, rather than the v1.3.0 / v1.4.0 split originally planned. The repo, CI and releases are on GitHub (GoReleaser → GitHub release + GHCR). The remaining work is outside this repo: the managed-infra template, the fsci publish path, and the client cutover.
 
 ## Context
 
-v1.0–v1.2 shipped the core server: publish, channels, CAS, tokens, UI, bundle import and lazy proxy channels (see [implementation.md](implementation.md)). This plan narrows packyard to its first production use.
+v1.0–v1.1 shipped the core server: publish, channels, CAS, tokens, UI, bundle import and lazy proxy channels (see [implementation.md](implementation.md)). This plan narrows packyard to its first production use.
 
 **Scope: a repository for an organisation's internal R packages.**
 
@@ -26,15 +28,15 @@ Under the v1.x stability policy ([CLAUDE.md](CLAUDE.md)), breaking changes are f
 | 2 | CRAN read surface v2 (`__linux__` routes, latest-only index, `Archive/`) | 4–5 d | 1 | — |
 | 3 | `Meta/archive.rds` | 2–3 d | 2 | — |
 | 4 | Publish surface for building every R version in CI | 2–3 d | 1 | — |
-| 5 | End-to-end verification | 2–3 d | 2, 3, 4 | **v1.3.0** |
-| 6 | Deployability for managed infrastructure | 4–5 d | 0 (independent of 1–5) | **v1.4.0** |
-| 7 | Migration tooling, docs, release pipeline | 3–4 d | 5 (docs), CI decision (pipeline) | with v1.3 / v1.4 |
+| 5 | End-to-end verification | 2–3 d | 2, 3, 4 | v1.2.0 |
+| 6 | Deployability for managed infrastructure | 4–5 d | 0 (independent of 1–5) | v1.2.0 |
+| 7 | Migration tooling, docs, release pipeline | 3–4 d | 5 (docs) | v1.2.0 |
 
 **Total:** about 4–5 weeks of focused work.
 
 - Phases 1–5 are the critical path for the first client deployment.
 - Phase 6 can run in parallel once Phase 0 is done.
-- v1.3.0 is the first version a client can install from. v1.4.0 is the first that deploys cleanly as a managed-infra service.
+- v1.2.0 is the first version a client can install from and the first that deploys cleanly as a managed-infra service.
 
 ---
 
@@ -277,15 +279,15 @@ In [internal/api/cran_protocol_test.go](internal/api/cran_protocol_test.go) and 
 
 ---
 
-## Phase 5: End-to-end verification (2–3 d) → release v1.3.0
+## Phase 5: End-to-end verification (2–3 d)
 
 ### 5.1 An end-to-end harness that runs anywhere
 
-- The existing nightly `cran-e2e.yml` is a GitHub Actions workflow. The repo has moved to Gitea and the CI platform is undecided, so the scenarios move into a **`make e2e` target**:
+- The scenarios live in a **`make e2e` target** rather than in a CI workflow:
   - Docker only;
   - it starts packyard, publishes fixtures, runs R containers;
   - it is independent of the CI vendor.
-- The CI job only calls `make e2e`.
+- The CI job (`.github/workflows/cran-e2e.yml`: path-filtered PRs, weekly, manual) only calls `make e2e`.
 
 ### 5.2 Matrix
 
@@ -310,21 +312,15 @@ The fixture package has three versions published, the newest yanked, and a binar
 
 **Also collect** the real User-Agent strings from base R, renv, pak and curl as test fixtures for `rMinorFromUserAgent`.
 
-### 5.4 Release v1.3.0
+### 5.4 Release
 
-- Release notes list every breaking change:
-  - module path (already committed);
-  - `matrix.yaml` shape;
-  - `/bin/linux/` removal;
-  - latest-only `PACKAGES`;
-  - `anonymous_reads` moving to `channels.yaml`.
-- Until Phase 7.3 lands, cut the release from whichever pipeline is available at the time.
+- Release notes list every breaking change (see the table under Cross-cutting).
 
-**Exit:** `make e2e` is green for both jobs; v1.3.0 is tagged.
+**Exit:** `make e2e` is green for both jobs; the release is tagged (shipped as v1.2.0).
 
 ---
 
-## Phase 6: Deployability for managed infrastructure (4–5 d) → release v1.4.0
+## Phase 6: Deployability for managed infrastructure (4–5 d)
 
 Independent of Phases 1–5; can run in parallel after Phase 0.
 
@@ -393,7 +389,7 @@ In [docs/admin.md](docs/admin.md):
 - **Restarts:** `channels.yaml` and `matrix.yaml` changes need a restart. Channel reconcile only ever adds. Removing a cell makes its binaries unreachable (candidates for `admin gc`).
 - **Deploying as a service:** health check command, metrics listener, token provisioning, backup schedule.
 
-**Exit:** a compose deployment with a read-only config mount, provisioned tokens, the separate metrics port and a scheduled backup works end to end; v1.4.0 is tagged.
+**Exit:** a compose deployment with a read-only config mount, provisioned tokens, the separate metrics port and a scheduled backup works end to end (shipped in v1.2.0).
 
 ---
 
@@ -421,19 +417,16 @@ In [docs/admin.md](docs/admin.md):
 - [README.md](README.md): scope statement, R configuration example using the `__linux__` URL.
 - [docs/proxy.md](docs/proxy.md): add a "frozen" note.
 
-### 7.3 Release pipeline on Gitea (needs the CI platform decision)
+### 7.3 Release pipeline
 
-> **Reverted (Sept 2026):** the repo moved back to GitHub; CI and releases are the GitHub Actions workflows again (GoReleaser → GitHub release + GHCR). Briefly implemented before that: `.woodpecker/ci.yml`, `release.yml` (GoReleaser → Gitea release; buildx → `gitea.cynkra.com/david.schoch/packyard:X.Y.Z` + `:latest`, amd64 + arm64) and `fuzz.yml`. GitHub workflows, GHCR and `Dockerfile.release` removed. `make e2e` stays manual (no Docker on the runners).
+The repo briefly moved to Gitea (Sept 2026) and this section planned porting CI and releases to Woodpecker. That was reverted: the repo is back on GitHub and the Gitea repo is gone. CI and releases stay on GitHub Actions:
 
-- Port `ci.yml` (vet, lint, test, openapi-lint), the release job and `make e2e` to the chosen CI: Woodpecker as in managed-infra, or Gitea Actions.
-- **GoReleaser:**
-  - switch `release.github` to `release.gitea` (`gitea_urls` for `gitea.cynkra.com`);
-  - image `gitea.cynkra.com/<owner>/packyard:X.Y.Z` and `:latest`;
-  - update the OCI `image.source` label.
-- Update the tag-convention docs (README, CLAUDE.md "Release cutting").
-- Decide whether GHCR images keep being published. Recommendation: stop. The artifacts live where the source lives.
+- `ci.yml` on push and PRs; `release.yml` (GoReleaser → GitHub release + multi-arch `ghcr.io/schochastics/packyard:X.Y.Z` and `:latest`); `post-release.yml` smoke test.
+- `cran-e2e.yml` and `fuzz.yml` on path-filtered PRs, weekly, and on demand.
 
-**Exit:** a tag push on Gitea produces a release and an image in the Gitea registry with no manual steps.
+**Open:** if a client network can't reach GHCR's blob CDN, mirror the image into a registry it can reach.
+
+**Exit:** a tag push produces a release and an image with no manual steps (done, v1.2.0).
 
 ---
 
@@ -443,14 +436,13 @@ In [docs/admin.md](docs/admin.md):
 
 | Change | Phase | Release |
 |---|---|---|
-| Go module path `gitea.cynkra.com/david.schoch/packyard` | done | v1.3.0 |
-| `matrix.yaml`: single `distro`, cells keyed by `r_minor`; per-cell `os`/`os_version`/`arch` removed | 1.2 | v1.3.0 |
-| `GET /api/v1/cells` response shape | 1.2 | v1.3.0 |
-| `/bin/linux/{cell}/…` removed in favour of `/__linux__/{distro}/latest/src/contrib/…` | 2.2–2.3 | v1.3.0 |
-| `PACKAGES` lists only the latest non-yanked version; older versions go under `Archive/` | 2.1 | v1.3.0 |
-| `allow_anonymous_reads` / `-allow-anonymous-reads` removed, replaced by per-channel `anonymous_reads` | 2.5 | v1.3.0 |
-| Secure cookies driven by `public_url` rather than local TLS | 6.3 | v1.4.0 |
-| `/metrics` moves off the main listener when `metrics_listen` is set | 6.4 | v1.4.0 |
+| `matrix.yaml`: single `distro`, cells keyed by `r_minor`; per-cell `os`/`os_version`/`arch` removed | 1.2 | v1.2.0 |
+| `GET /api/v1/cells` response shape | 1.2 | v1.2.0 |
+| `/bin/linux/{cell}/…` removed in favour of `/__linux__/{distro}/latest/src/contrib/…` | 2.2–2.3 | v1.2.0 |
+| `PACKAGES` lists only the latest non-yanked version; older versions go under `Archive/` | 2.1 | v1.2.0 |
+| `allow_anonymous_reads` / `-allow-anonymous-reads` removed, replaced by per-channel `anonymous_reads` | 2.5 | v1.2.0 |
+| Secure cookies driven by `public_url` rather than local TLS | 6.3 | v1.2.0 |
+| `/metrics` moves off the main listener when `metrics_listen` is set | 6.4 | v1.2.0 |
 
 ### Risks
 
@@ -460,7 +452,7 @@ In [docs/admin.md](docs/admin.md):
 | User-Agent formats differ across base R, renv, pak and Connect | Collect real samples in 5.3; fall back to `default_r_minor`; source always works |
 | Intermediate caches serving the wrong R version's binary | `Vary: User-Agent` on every `__linux__` response (2.2) |
 | Proxy channels break under the route and matrix changes | Keep their tests green in every phase; binary resolution via `binary_urls[cell]` (2.2) |
-| CI platform undecided, blocking releases | `make e2e` is vendor-independent (5.1); v1.3.0 can be cut manually if 7.3 lags |
+| GHCR not reachable from a client network | Mirror the image into a reachable registry (7.3) |
 
 ### Deliberately not in this plan
 

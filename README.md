@@ -112,8 +112,8 @@ tagged release. The container initialises on first start (creates DB,
 CAS, default configs) and runs as a non-root user (uid 65532).
 
 **Tag convention:** the Git tag is `vX.Y.Z`; the image tag is `X.Y.Z`
-(no `v` prefix). Pull `ghcr.io/schochastics/packyard:1.3.0`,
-not `:v1.3.0`. `:latest` tracks the most recent release.
+(no `v` prefix). Pull `ghcr.io/schochastics/packyard:1.2.0`,
+not `:v1.2.0`. `:latest` tracks the most recent release.
 
 ### Binary
 
@@ -217,8 +217,8 @@ CI runs on GitHub Actions ([.github/workflows/](.github/workflows/)):
 ```sh
 make check
 gh workflow run cran-e2e.yml && gh run watch   # real R clients, ~15 min
-git tag -a v1.2.0 -m "packyard v1.2.0"
-git push origin v1.2.0
+git tag -a v1.2.1 -m "packyard v1.2.1"
+git push origin v1.2.1
 gh run watch
 ```
 
