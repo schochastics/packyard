@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/schochastics/packyard/internal/db"
 	_ "modernc.org/sqlite" // registers the "sqlite" driver for snapshot reads
 )
 
@@ -239,6 +240,10 @@ func Restore(ctx context.Context, from string, t Target) (RestoreResult, error) 
 	rep, err := Verify(ctx, from)
 	if err != nil {
 		return res, err
+	}
+	if latest, err := db.LatestEmbeddedVersion(); err == nil && rep.Manifest.SchemaVersion > latest {
+		return res, fmt.Errorf("%w: the backup is at migration %d, this binary knows up to %d; restore with the packyard version that took it",
+			db.ErrSchemaTooNew, rep.Manifest.SchemaVersion, latest)
 	}
 	if !rep.OK() {
 		return res, fmt.Errorf("backup failed verification (integrity=%s, missing=%d, corrupt=%d); refusing to restore",

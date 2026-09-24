@@ -162,6 +162,11 @@ func runInit(cfg *config.ServerConfig, opts config.BootstrapOptions) error {
 // empty DB at a mistyped path, and a backup or gc against an empty DB
 // looks like a repository with nothing in it: a backup that silently
 // holds nothing, or a gc that deletes every blob.
+//
+// It never migrates: an admin container on a newer image must not
+// change the schema underneath an older running server. A DB that
+// isn't exactly at this binary's schema is refused; the server migrates
+// on start.
 func openExistingDB(cfg *config.ServerConfig) (*db.DB, error) {
 	path := filepath.Join(cfg.DataDir, "db.sqlite")
 	if _, err := os.Stat(path); err != nil {
@@ -170,7 +175,15 @@ func openExistingDB(cfg *config.ServerConfig) (*db.DB, error) {
 		}
 		return nil, fmt.Errorf("stat db: %w", err)
 	}
-	return openDB(cfg)
+	database, err := db.Open(context.Background(), path)
+	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+	if err := db.CheckEmbedded(context.Background(), database); err != nil {
+		_ = database.Close()
+		return nil, err
+	}
+	return database, nil
 }
 
 func openDB(cfg *config.ServerConfig) (*db.DB, error) {

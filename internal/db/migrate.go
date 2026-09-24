@@ -27,6 +27,69 @@ func MigrateEmbedded(ctx context.Context, db *DB) error {
 	return Migrate(ctx, db, sub)
 }
 
+// ErrSchemaTooNew is returned when the database has migrations applied
+// that this binary doesn't know: a newer packyard ran against it, or a
+// backup from a newer version was restored. Running against a schema
+// the code doesn't understand is how data gets corrupted, and there is
+// no downgrade path.
+var ErrSchemaTooNew = errors.New("database schema is newer than this packyard binary")
+
+// ErrSchemaBehind is returned by [CheckEmbedded] when migrations are
+// pending.
+var ErrSchemaBehind = errors.New("database schema is older than this packyard binary")
+
+// LatestEmbeddedVersion is the highest migration version shipped in the
+// binary.
+func LatestEmbeddedVersion() (int, error) {
+	sub, err := fs.Sub(embeddedMigrations, "migrations")
+	if err != nil {
+		return 0, err
+	}
+	ms, err := readMigrations(sub)
+	if err != nil {
+		return 0, err
+	}
+	if len(ms) == 0 {
+		return 0, nil
+	}
+	return ms[len(ms)-1].version, nil
+}
+
+// CheckEmbedded reports whether db's schema matches the migrations
+// shipped in the binary exactly, without changing anything. Commands
+// that only read or copy an existing repository (admin verbs, backup)
+// use it instead of migrating, so an admin container on a newer image
+// never migrates the DB underneath an older running server.
+func CheckEmbedded(ctx context.Context, db *DB) error {
+	latest, err := LatestEmbeddedVersion()
+	if err != nil {
+		return err
+	}
+	current, err := currentVersion(ctx, db)
+	if err != nil {
+		return err
+	}
+	switch {
+	case current > latest:
+		return fmt.Errorf("%w (database at migration %d, binary knows up to %d)", ErrSchemaTooNew, current, latest)
+	case current < latest:
+		return fmt.Errorf("%w (database at migration %d, binary expects %d); start the server once to migrate", ErrSchemaBehind, current, latest)
+	}
+	return nil
+}
+
+func currentVersion(ctx context.Context, db *DB) (int, error) {
+	var v sql.NullInt64
+	err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&v)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read schema version: %w", err)
+	}
+	return int(v.Int64), nil
+}
+
 // migrationFilename matches "NNN_some-name.sql" where NNN is one or more digits.
 // The leading number is the migration's version; filenames without this shape
 // are rejected so we never silently skip a file.
@@ -66,6 +129,15 @@ func Migrate(ctx context.Context, db *DB, fsys fs.FS) error {
 	migrations, err := readMigrations(fsys)
 	if err != nil {
 		return err
+	}
+	known := map[int]struct{}{}
+	for _, m := range migrations {
+		known[m.version] = struct{}{}
+	}
+	for v := range applied {
+		if _, ok := known[v]; !ok {
+			return fmt.Errorf("%w (migration %d is applied but not shipped in this binary)", ErrSchemaTooNew, v)
+		}
 	}
 
 	for _, m := range migrations {
@@ -155,6 +227,19 @@ func applyOne(ctx context.Context, db *DB, m migration) error {
 			_ = rbErr
 		}
 	}()
+
+	// Another process (a server restart racing an admin command) may
+	// have applied this migration since the applied set was read. The
+	// check runs under the write lock BEGIN IMMEDIATE took, so it is
+	// authoritative.
+	var done int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, m.version).Scan(&done); err != nil {
+		return fmt.Errorf("re-check version: %w", err)
+	}
+	if done > 0 {
+		return nil
+	}
 
 	if _, err := tx.ExecContext(ctx, m.body); err != nil {
 		return fmt.Errorf("exec: %w", err)

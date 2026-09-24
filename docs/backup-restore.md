@@ -128,7 +128,7 @@ of new blobs.
 4. Start the server. It applies pending migrations, so restoring an
    older backup onto a newer packyard works. There are no down
    migrations, so a backup made by a newer packyard needs that
-   version or later.
+   version or later; `admin restore` refuses it otherwise.
 5. Spot-check: `admin reindex` must report no missing blobs, and an
    `install.packages()` from the restored server should succeed.
 

@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
@@ -185,5 +186,81 @@ func TestMigrateRejectsDuplicateVersion(t *testing.T) {
 
 	if err := db.Migrate(ctx, database, fsys); err == nil {
 		t.Fatal("Migrate accepted duplicate version")
+	}
+}
+
+func TestMigrateRefusesNewerSchema(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	database := openTestDB(t)
+	newer := fstest.MapFS{
+		"001_first.sql":  &fstest.MapFile{Data: []byte(`CREATE TABLE a (x INTEGER);`)},
+		"002_second.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE b (y INTEGER);`)},
+	}
+	if err := db.Migrate(ctx, database, newer); err != nil {
+		t.Fatal(err)
+	}
+	older := fstest.MapFS{"001_first.sql": newer["001_first.sql"]}
+	if err := db.Migrate(ctx, database, older); !errors.Is(err, db.ErrSchemaTooNew) {
+		t.Fatalf("older binary against newer schema: err = %v", err)
+	}
+}
+
+func TestCheckEmbedded(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	database := openTestDB(t)
+	if err := db.CheckEmbedded(ctx, database); !errors.Is(err, db.ErrSchemaBehind) {
+		t.Fatalf("fresh DB: err = %v", err)
+	}
+	if err := db.MigrateEmbedded(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CheckEmbedded(ctx, database); err != nil {
+		t.Fatalf("migrated DB: err = %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO schema_migrations(version, name) VALUES (999, '999_future')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CheckEmbedded(ctx, database); !errors.Is(err, db.ErrSchemaTooNew) {
+		t.Fatalf("future DB: err = %v", err)
+	}
+}
+
+// Two processes starting at once both see a migration as pending; the
+// second must skip it rather than fail on e.g. a duplicate column.
+func TestMigrateConcurrentOpenersBothSucceed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "packyard.sqlite")
+	fsys := fstest.MapFS{
+		"001_first.sql":  &fstest.MapFile{Data: []byte(`CREATE TABLE a (x INTEGER);`)},
+		"002_alter.sql":  &fstest.MapFile{Data: []byte(`ALTER TABLE a ADD COLUMN y INTEGER;`)},
+		"003_create.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE c (z INTEGER);`)},
+	}
+	// Create the file first (WAL mode persists), as a server that has
+	// run before would have; the race of interest is on migrations.
+	first, err := db.Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = first.Close()
+
+	errs := make(chan error, 4)
+	for range 4 {
+		go func() {
+			d, err := db.Open(ctx, path)
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer func() { _ = d.Close() }()
+			errs <- db.Migrate(ctx, d, fsys)
+		}()
+	}
+	for range 4 {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent migrate: %v", err)
+		}
 	}
 }

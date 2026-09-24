@@ -392,8 +392,11 @@ writes a row to the `events` table. Read it via
 
 1. `admin backup -out <dir>`, then `admin backup -verify <dir>`.
 2. Pull the new image (or swap the binary) and restart. Migrations
-   are applied on startup.
-3. There are no down migrations. To roll back, restore the backup
+   are applied on startup, by the server only: admin commands refuse
+   to run against a DB whose schema doesn't match their binary
+   exactly, so run them with the same version as the server.
+3. There are no down migrations. An older binary refuses to start on
+   a DB a newer one has migrated. To roll back, restore the backup
    onto the old version.
 
 Read the release notes first. Until adoption picks up, v1.x releases

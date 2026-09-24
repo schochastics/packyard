@@ -31,9 +31,12 @@ type DB struct {
 // error surfaces at startup rather than on the first query.
 func Open(ctx context.Context, path string) (*DB, error) {
 	q := url.Values{}
+	// busy_timeout goes first: switching a fresh file to WAL takes a
+	// lock, and without the timeout a second process opening the DB at
+	// the same moment fails immediately with SQLITE_BUSY.
+	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "foreign_keys(ON)")
-	q.Add("_pragma", "busy_timeout(5000)")
 	q.Add("_pragma", "synchronous(NORMAL)")
 	// Every BeginTx in this codebase wraps a write (publish, yank,
 	// delete, migration) — readers use QueryContext directly. Ask
