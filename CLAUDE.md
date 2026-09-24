@@ -104,8 +104,12 @@ it), and the release job only runs after `go test -race ./...` passes.
 - **GHCR packages default to private on first push.** Once a package
   is public it stays public; first release requires a one-time flip
   in the UI under `github.com/users/schochastics/packages/container/packyard/settings`.
-- **`go 1.25.0` is pinned.** `modernc.org/sqlite v1.49.1` requires
-  it. Do not bump the `go` directive downward.
+- **`go 1.26.0` is the module's Go version** (moved from 1.25 in
+  Sept 2026 for golang.org/x/sync and vacuum). CI's setup-go runs with
+  `GOTOOLCHAIN=local` on exactly that version, so the Dockerfile build
+  image (`golang:1.26-alpine`) and tools installed in CI (vacuum,
+  pinned in the Makefile and ci.yml) must build with it. Bump them
+  together.
 - **IDE spelling warnings on `packyard`, `CRAN`, `organisation`, `renv`,
   `runbook` etc. are noise.** The IDE's spell checker flags
   project-specific vocabulary and British English; ignore them.
