@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"time"
 )
 
 // tmpDir is the subdirectory under the store root used for partial
@@ -91,9 +92,13 @@ func (s *Store) Write(r io.Reader) (string, int64, error) {
 	finalPath := s.pathFor(sum)
 
 	// Cheap fast path: another concurrent writer (or an earlier publish)
-	// already has this content. Leave that file alone; os.Remove on the
-	// temp file will run via defer.
+	// already has this content. Keep that file, but refresh its mtime:
+	// it may be an orphan that GC's age grace period would otherwise
+	// let go while the caller is about to reference it again.
+	// os.Remove on the temp file runs via defer.
 	if _, err := os.Stat(finalPath); err == nil {
+		now := time.Now()
+		_ = os.Chtimes(finalPath, now, now)
 		return sum, n, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", 0, fmt.Errorf("cas: stat dest: %w", err)

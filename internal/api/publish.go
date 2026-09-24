@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -455,7 +456,7 @@ func decodeManifest(r io.Reader, m *Manifest) *httpError {
 		}
 	}
 
-	dec := json.NewDecoder(io.NopCloser(bytesReader(buf)))
+	dec := json.NewDecoder(bytes.NewReader(buf))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(m); err != nil {
 		return &httpError{
@@ -466,22 +467,6 @@ func decodeManifest(r io.Reader, m *Manifest) *httpError {
 		}
 	}
 	return nil
-}
-
-// bytesReader is a tiny helper so decodeManifest doesn't need an extra
-// dep on bytes.NewReader while keeping the stdlib import list tight.
-type bytesReader []byte
-
-func (b bytesReader) Read(p []byte) (int, error) {
-	if len(b) == 0 {
-		return 0, io.EOF
-	}
-	n := copy(p, b)
-	// We return EOF on the final read so callers see it in one shot.
-	if n == len(b) {
-		return n, io.EOF
-	}
-	return n, nil
 }
 
 // multipartErr maps a MaxBytesReader or parser error to an httpError.

@@ -205,7 +205,7 @@ prod     bar      0.2.1    2026-04-19 10:00:02
 …
 ```
 
-### `admin gc [-dry-run]`
+### `admin gc [-dry-run] [-min-age 1h] [-force]`
 
 Reclaims CAS blobs that no longer appear in any package or binary
 row. Walks the CAS tree, checks each blob's sha256 against a live set
@@ -223,28 +223,39 @@ Output format:
 
 ```
 live blobs referenced by DB: 284
-scanned=292 removed=8 freed=17.3 MiB skipped_stray=0
+scanned=292 removed=8 freed=17.3 MiB skipped_young=1 skipped_stray=0 tmp_removed=0
 ```
 
 - `scanned` — total blob files walked (matching the `<aa>/<rest>`
   shape).
 - `removed` — deleted in this run.
 - `freed` — bytes reclaimed (sum of removed sizes).
+- `skipped_young` — unreferenced blobs newer than `-min-age`, kept.
 - `skipped_stray` — files under the CAS root that don't look like
   valid blobs. These are left alone (likely operator probes) and
   counted here for visibility.
+- `tmp_removed` — abandoned partial uploads in `cas/tmp/` older than
+  `-min-age` (left behind when the server was killed mid-upload).
 
 When to run: after overwrites on mutable channels, after a batch of
 `DELETE /api/v1/packages/…`, or on a schedule (e.g. weekly cron).
 Yanked packages' blobs are retained — yank is a visibility op, not a
 deletion.
 
-Safety: gc is an admin-invoked op, not a background task. Running it
-against a live server is not a goal of the v1 design — stop the
-server or accept that a concurrent publish-and-gc can race (the
-window is small and the worst case is a freshly-published blob
-getting deleted, which the publish then notices via its own CAS
-write — still not desirable).
+Safety:
+
+- **Running against a live server is safe.** A publish writes its
+  blobs before the DB row referencing them commits. `-min-age`
+  (default 1h) keeps every unreferenced blob newer than that, and a
+  publish that reuses an existing blob refreshes its mtime. Raise it if
+  uploads can take longer than an hour; `-min-age 0` is only safe with
+  the server stopped.
+- **Refuses an empty live set.** If the DB references no blobs at all
+  but the CAS holds some, gc stops: that almost always means the wrong
+  `-data` dir or a replaced `db.sqlite`. Pass `-force` if the
+  repository really is empty.
+- Like every admin verb, gc fails if `<data>/db.sqlite` doesn't exist
+  instead of creating an empty one.
 
 ### `admin reindex`
 

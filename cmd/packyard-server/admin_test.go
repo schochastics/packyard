@@ -451,7 +451,7 @@ func TestAdminGCReclaimsOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := deps.CAS.GC(live)
+	report, err := deps.CAS.GC(live, cas.GCOptions{})
 	if err != nil {
 		t.Fatalf("GC: %v", err)
 	}
@@ -554,5 +554,42 @@ func TestAdminImportBundleFollowsChannelPolicy(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A mistyped -data must not produce a fresh empty DB that gc or backup
+// then act on.
+func TestAdminCommandsRequireExistingDB(t *testing.T) {
+	cfg := config.DefaultServerConfig()
+	cfg.DataDir = t.TempDir()
+	if err := adminGC(&cfg, nil); err == nil || !strings.Contains(err.Error(), "no database") {
+		t.Errorf("gc on missing DB: err = %v", err)
+	}
+	if err := adminBackup(&cfg, "", []string{"-out", filepath.Join(t.TempDir(), "b")}); err == nil || !strings.Contains(err.Error(), "no database") {
+		t.Errorf("backup on missing DB: err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.DataDir, "db.sqlite")); !os.IsNotExist(err) {
+		t.Errorf("a db.sqlite was created: %v", err)
+	}
+}
+
+func TestAdminGCRefusesEmptyLiveSet(t *testing.T) {
+	cfg := config.DefaultServerConfig()
+	cfg.DataDir = t.TempDir()
+	captureStdout(t, func() error { return runInit(&cfg, config.BootstrapOptions{}) })
+	const orphan = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	root := filepath.Join(cfg.DataDir, "cas")
+	writeOrphan(t, root, orphan, "only blob")
+
+	err := adminGC(&cfg, []string{"-min-age", "0"})
+	if err == nil || !strings.Contains(err.Error(), "refusing") {
+		t.Fatalf("gc with empty live set: err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, orphan[:2], orphan[2:])); err != nil {
+		t.Fatalf("blob removed despite refusal: %v", err)
+	}
+	captureStdout(t, func() error { return adminGC(&cfg, []string{"-min-age", "0", "-force"}) })
+	if _, err := os.Stat(filepath.Join(root, orphan[:2], orphan[2:])); !os.IsNotExist(err) {
+		t.Errorf("-force did not collect: %v", err)
 	}
 }

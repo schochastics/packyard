@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -102,7 +103,7 @@ func decodeYankRequest(body io.Reader) (YankRequest, *httpError) {
 	if len(buf) == 0 {
 		return req, nil
 	}
-	dec := json.NewDecoder(bytesReader(buf))
+	dec := json.NewDecoder(bytes.NewReader(buf))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		return YankRequest{}, &httpError{

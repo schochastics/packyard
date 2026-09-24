@@ -178,6 +178,43 @@ func TestLoginSubmitInvalidTokenRedirectsWithFlash(t *testing.T) {
 	}
 }
 
+func TestLoginSubmitNonAdminTokenRejected(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "reader", "read:*,publish:dev", false)
+	form := url.Values{"token": {tok}}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Location"); got != "/ui/login?forbidden=1" {
+		t.Fatalf("Location = %q; want /ui/login?forbidden=1", got)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName && c.Value != "" {
+			t.Fatalf("should not set session cookie for a non-admin token")
+		}
+	}
+}
+
+// A cookie minted for a non-admin token (e.g. before the scope check
+// existed, or after the token was rescoped) must not open any page.
+func TestNonAdminSessionTreatedAsAnonymous(t *testing.T) {
+	h, database := newTestHandler(t)
+	tok := seedToken(t, database.DB, "reader", "read:prod", false)
+	value := signSessionCookie(tok, h.deps.SessionKey)
+
+	for _, path := range []string{"/", "/events", "/storage", "/cells"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", path, nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: value})
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/ui/login" {
+			t.Errorf("%s: status=%d loc=%q, want redirect to login", path, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+}
+
 func TestLoginSubmitEmptyTokenRedirects(t *testing.T) {
 	h, _ := newTestHandler(t)
 	rec := httptest.NewRecorder()

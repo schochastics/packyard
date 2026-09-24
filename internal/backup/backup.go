@@ -69,19 +69,17 @@ func Backup(ctx context.Context, src Source, dir string) (Result, error) {
 	}
 
 	// VACUUM INTO refuses to overwrite, so snapshot beside the old
-	// one and rename over it.
+	// one. The snapshot only replaces the previous db.sqlite once every
+	// blob it references is in place: a backup that fails midway (disk
+	// full, missing blob) leaves the previous backup usable.
 	dbPath := filepath.Join(dir, "db.sqlite")
 	tmp := fmt.Sprintf("%s.tmp-%d", dbPath, time.Now().UnixNano())
+	defer func() { _ = os.Remove(tmp) }()
 	if _, err := src.DB.ExecContext(ctx, `VACUUM INTO ?`, tmp); err != nil {
-		_ = os.Remove(tmp)
 		return res, fmt.Errorf("snapshot db: %w", err)
 	}
-	if err := os.Rename(tmp, dbPath); err != nil {
-		_ = os.Remove(tmp)
-		return res, err
-	}
 
-	snap, err := openReadOnly(dbPath)
+	snap, err := openReadOnly(tmp)
 	if err != nil {
 		return res, err
 	}
@@ -115,6 +113,12 @@ func Backup(ctx context.Context, src Source, dir string) (Result, error) {
 			return res, fmt.Errorf("copy blob %s: %w", sum, err)
 		}
 		res.BlobsAdded++
+	}
+	if err := snap.Close(); err != nil {
+		return res, err
+	}
+	if err := os.Rename(tmp, dbPath); err != nil {
+		return res, err
 	}
 
 	names := make([]string, 0, len(src.ConfigFiles))
@@ -192,20 +196,7 @@ func Verify(ctx context.Context, dir string) (VerifyReport, error) {
 		}
 	}
 
-	err = filepath.WalkDir(casDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) && path == casDir {
-				return fs.SkipAll
-			}
-			return err
-		}
-		if d.IsDir() {
-			if d.Name() == "tmp" && path != casDir {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		rel, _ := filepath.Rel(casDir, path)
+	err = walkBlobs(casDir, func(path, rel string) error {
 		want := strings.ReplaceAll(filepath.ToSlash(rel), "/", "")
 		got, err := hashFile(path)
 		if err != nil {
@@ -263,37 +254,55 @@ func Restore(ctx context.Context, from string, t Target) (RestoreResult, error) 
 	if err := os.MkdirAll(t.DataDir, 0o750); err != nil {
 		return res, err
 	}
-	if occupied {
-		for _, p := range []string{dbPath, dbPath + "-wal", dbPath + "-shm", casDir} {
-			if err := os.RemoveAll(p); err != nil {
-				return res, err
-			}
-		}
-	}
 
-	if err := copyFile(filepath.Join(from, "db.sqlite"), dbPath, 0o640); err != nil {
+	// Stage the whole copy inside the data dir (same filesystem, so the
+	// final moves are renames). Until the swap below, a failure leaves
+	// the existing data untouched.
+	stage, err := os.MkdirTemp(t.DataDir, ".restore-")
+	if err != nil {
+		return res, err
+	}
+	defer func() { _ = os.RemoveAll(stage) }()
+
+	stagedDB := filepath.Join(stage, "db.sqlite")
+	stagedCAS := filepath.Join(stage, "cas")
+	if err := copyFile(filepath.Join(from, "db.sqlite"), stagedDB, 0o640); err != nil {
 		return res, fmt.Errorf("restore db: %w", err)
 	}
+	if err := os.MkdirAll(filepath.Join(stagedCAS, "tmp"), 0o750); err != nil {
+		return res, err
+	}
 	fromCAS := filepath.Join(from, "cas")
-	err = filepath.WalkDir(fromCAS, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) && path == fromCAS {
-				return fs.SkipAll
-			}
-			return err
-		}
-		if d.IsDir() {
-			if d.Name() == "tmp" && path != fromCAS {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		rel, _ := filepath.Rel(fromCAS, path)
+	err = walkBlobs(fromCAS, func(path, rel string) error {
 		res.Blobs++
-		return linkOrCopy(path, filepath.Join(casDir, rel))
+		return linkOrCopy(path, filepath.Join(stagedCAS, rel))
 	})
 	if err != nil {
 		return res, fmt.Errorf("restore blobs: %w", err)
+	}
+
+	// Swap: move the old data aside, the blobs in, and the DB last, so
+	// an interrupted swap never leaves a DB pointing at missing blobs.
+	if occupied {
+		old := filepath.Join(stage, "replaced")
+		if err := os.Mkdir(old, 0o750); err != nil {
+			return res, err
+		}
+		for _, name := range []string{"db.sqlite", "db.sqlite-wal", "db.sqlite-shm", "cas"} {
+			p := filepath.Join(t.DataDir, name)
+			if err := os.Rename(p, filepath.Join(old, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return res, fmt.Errorf("move old %s aside: %w", name, err)
+			}
+		}
+	} else if err := os.RemoveAll(casDir); err != nil {
+		// An empty or tmp-only cas/ from a bootstrap.
+		return res, err
+	}
+	if err := os.Rename(stagedCAS, casDir); err != nil {
+		return res, fmt.Errorf("move blobs into place: %w", err)
+	}
+	if err := os.Rename(stagedDB, dbPath); err != nil {
+		return res, fmt.Errorf("move db into place: %w", err)
 	}
 
 	for _, name := range rep.Manifest.ConfigFiles {
@@ -312,6 +321,34 @@ func Restore(ctx context.Context, from string, t Target) (RestoreResult, error) 
 		res.ConfigWritten = append(res.ConfigWritten, name)
 	}
 	return res, nil
+}
+
+// walkBlobs calls fn for every file under casDir except tmp/ and dot
+// files (temp files a killed copy left behind). A missing casDir is an
+// empty store.
+func walkBlobs(casDir string, fn func(path, rel string) error) error {
+	return filepath.WalkDir(casDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) && path == casDir {
+				return fs.SkipAll
+			}
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == "tmp" && path != casDir {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		rel, err := filepath.Rel(casDir, path)
+		if err != nil {
+			return err
+		}
+		return fn(path, rel)
+	})
 }
 
 func openReadOnly(path string) (*sql.DB, error) {
@@ -393,6 +430,10 @@ func copyFile(from, to string, perm fs.FileMode) error {
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
 		return err
 	}

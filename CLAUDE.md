@@ -40,9 +40,10 @@ pre-v2 module path installs an incompatible v1.x release.
 
 ## Runtime invariants worth knowing before changing code
 
-- **`-data` default is `./data`.** In the Docker image, `WORKDIR
-  /data`; always pass `-data /data` explicitly when invoking the
-  container — otherwise the resolved dir is `/data/data`.
+- **`-data` default is `./data`.** The Docker images end with
+  `WORKDIR /`, so inside the container it resolves to the `/data`
+  volume. (Before v1.2.1 the workdir was `/data` and the default
+  silently became `/data/data`.)
 - **Tokens are stored only as `sha256(token)`.** The plaintext is
   printed once at mint time. Losing the DB means every token has to
   be reissued; no recovery path.

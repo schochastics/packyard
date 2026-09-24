@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/schochastics/packyard/internal/cas"
 )
@@ -29,7 +30,7 @@ func TestGCRemovesOnlyDeadBlobs(t *testing.T) {
 
 	liveSet := map[string]struct{}{live1: {}, live2: {}}
 
-	report, err := s.GC(liveSet)
+	report, err := s.GC(liveSet, cas.GCOptions{})
 	if err != nil {
 		t.Fatalf("GC: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestGCEmptyLiveSetWipesAllBlobs(t *testing.T) {
 	_, _ = seedBlob(t, s, []byte("b"))
 	_, _ = seedBlob(t, s, []byte("c"))
 
-	report, err := s.GC(map[string]struct{}{})
+	report, err := s.GC(map[string]struct{}{}, cas.GCOptions{})
 	if err != nil {
 		t.Fatalf("GC: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestGCLeavesTmpDirAlone(t *testing.T) {
 		t.Fatalf("create stray: %v", err)
 	}
 
-	_, err := s.GC(map[string]struct{}{live: {}})
+	_, err := s.GC(map[string]struct{}{live: {}}, cas.GCOptions{})
 	if err != nil {
 		t.Fatalf("GC: %v", err)
 	}
@@ -116,7 +117,7 @@ func TestGCIgnoresStrayFilesOutsideShards(t *testing.T) {
 		t.Fatalf("create bogus: %v", err)
 	}
 
-	report, err := s.GC(map[string]struct{}{live: {}})
+	report, err := s.GC(map[string]struct{}{live: {}}, cas.GCOptions{})
 	if err != nil {
 		t.Fatalf("GC: %v", err)
 	}
@@ -136,5 +137,92 @@ func TestGCIgnoresStrayFilesOutsideShards(t *testing.T) {
 	}
 	if !s.Has(live) {
 		t.Error("live blob was removed")
+	}
+}
+
+func TestGCMinAgeKeepsYoungOrphans(t *testing.T) {
+	t.Parallel()
+
+	s := newStore(t)
+	old, oldSize := seedBlob(t, s, []byte("old orphan"))
+	young, _ := seedBlob(t, s, []byte("young orphan"))
+
+	past := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(s.Root(), old[:2], old[2:]), past, past); err != nil {
+		t.Fatal(err)
+	}
+	staleTmp := filepath.Join(s.Root(), "tmp", "blob-stale")
+	freshTmp := filepath.Join(s.Root(), "tmp", "blob-fresh")
+	for _, p := range []string{staleTmp, freshTmp} {
+		if err := os.WriteFile(p, []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chtimes(staleTmp, past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := s.GC(map[string]struct{}{}, cas.GCOptions{MinAge: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Removed != 1 || report.FreedBytes != oldSize || report.SkippedYoung != 1 || report.TmpRemoved != 1 {
+		t.Errorf("report = %+v", report)
+	}
+	if s.Has(old) {
+		t.Error("old orphan survived")
+	}
+	if !s.Has(young) {
+		t.Error("young orphan was removed inside the grace period")
+	}
+	if _, err := os.Stat(staleTmp); !os.IsNotExist(err) {
+		t.Errorf("stale temp file survived: %v", err)
+	}
+	if _, err := os.Stat(freshTmp); err != nil {
+		t.Errorf("fresh temp file removed: %v", err)
+	}
+}
+
+// Re-writing an existing blob refreshes its mtime, so an orphan that a
+// new publish reuses gets a fresh grace period.
+func TestWriteRefreshesExistingBlobMtime(t *testing.T) {
+	t.Parallel()
+
+	s := newStore(t)
+	sum, _ := seedBlob(t, s, []byte("reused"))
+	path := filepath.Join(s.Root(), sum[:2], sum[2:])
+	past := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = seedBlob(t, s, []byte("reused"))
+
+	report, err := s.GC(map[string]struct{}{}, cas.GCOptions{MinAge: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Removed != 0 || !s.Has(sum) {
+		t.Errorf("reused blob collected: %+v", report)
+	}
+}
+
+func TestGCDryRunDeletesNothing(t *testing.T) {
+	t.Parallel()
+
+	s := newStore(t)
+	dead, _ := seedBlob(t, s, []byte("dead"))
+	var seen []string
+	report, err := s.GC(map[string]struct{}{}, cas.GCOptions{
+		DryRun:   true,
+		OnRemove: func(sum string, _ int64) { seen = append(seen, sum) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Removed != 1 || len(seen) != 1 || seen[0] != dead {
+		t.Errorf("report = %+v seen = %v", report, seen)
+	}
+	if !s.Has(dead) {
+		t.Error("dry run deleted a blob")
 	}
 }

@@ -48,7 +48,7 @@ func adminBackup(cfg *config.ServerConfig, configPath string, args []string) err
 		return nil
 	}
 
-	database, err := openDB(cfg)
+	database, err := openExistingDB(cfg)
 	if err != nil {
 		return err
 	}

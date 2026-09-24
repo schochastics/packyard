@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -254,7 +255,7 @@ func decodeCreateTokenRequest(body io.Reader) (CreateTokenRequest, *httpError) {
 	}
 
 	var req CreateTokenRequest
-	dec := json.NewDecoder(bytesReader(buf))
+	dec := json.NewDecoder(bytes.NewReader(buf))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		return CreateTokenRequest{}, &httpError{
