@@ -360,7 +360,7 @@ func openReadOnly(path string) (*sql.DB, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, err
 	}
-	d, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	d, err := sql.Open("sqlite", db.FileURI(path, "mode=ro"))
 	if err != nil {
 		return nil, err
 	}
