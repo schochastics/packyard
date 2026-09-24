@@ -42,7 +42,7 @@ func metricsMiddleware(deps Deps) func(http.Handler) http.Handler {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			labels := []string{r.Method, strconv.Itoa(status)}
+			labels := []string{methodLabel(r.Method), strconv.Itoa(status)}
 
 			deps.Metrics.HTTPRequestsTotal.WithLabelValues(labels...).Inc()
 			deps.Metrics.HTTPRequestDuration.WithLabelValues(labels...).
@@ -58,4 +58,16 @@ func MetricsHandler(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", handleMetrics(deps))
 	return mux
+}
+
+// methodLabel folds the request method into a fixed set. net/http
+// accepts any token as a method, so using it verbatim would let an
+// unauthenticated client create unbounded metric series.
+func methodLabel(m string) string {
+	switch m {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodOptions:
+		return m
+	}
+	return "other"
 }

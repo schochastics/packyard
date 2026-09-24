@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -111,12 +112,27 @@ func Lookup(ctx context.Context, db *sql.DB, plaintext string) (Identity, error)
 	}, nil
 }
 
-// touchLastUsed bumps tokens.last_used_at. Best-effort: a failure here
-// must not reject the request.
+// lastUsedInterval bounds how often touchLastUsed writes per token.
+// Every authenticated request (each PACKAGES and tarball GET of an R
+// client with a read token) would otherwise be a SQLite write, all
+// serialised on the one write lock.
+const lastUsedInterval = time.Minute
+
+// lastTouched maps token id → time of the last last_used_at write.
+var lastTouched sync.Map
+
+// touchLastUsed bumps tokens.last_used_at, at most once per
+// lastUsedInterval per token, so the column is accurate to about a
+// minute. Best-effort: a failure here must not reject the request.
 func touchLastUsed(ctx context.Context, db *sql.DB, id int64) {
+	now := time.Now()
+	if prev, ok := lastTouched.Load(id); ok && now.Sub(prev.(time.Time)) < lastUsedInterval {
+		return
+	}
+	lastTouched.Store(id, now)
 	_, _ = db.ExecContext(ctx,
 		`UPDATE tokens SET last_used_at = ? WHERE id = ?`,
-		time.Now().UTC().Format(time.RFC3339Nano),
+		now.UTC().Format(time.RFC3339Nano),
 		id,
 	)
 }
