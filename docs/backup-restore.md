@@ -15,12 +15,11 @@ commands cover it:
 
 ```
 <data-dir>/
-  db.sqlite           # catalog: channels, packages, binaries, events, tokens
+  db.sqlite           # catalog: channels, packages, binaries, events, tokens, UI sessions
   db.sqlite-wal/-shm  # present while the server runs
   cas/<aa>/<rest>     # content-addressed blobs: source + binary tarballs
   channels.yaml       # channel set (unless channels_file points elsewhere)
   matrix.yaml         # distro + R versions (unless matrix_file points elsewhere)
-  ui-session-key      # HMAC key for UI cookies; not backed up (users log in again)
 ```
 
 Tokens live in `db.sqlite`, and only as `sha256(token)`. Restoring a
@@ -67,7 +66,8 @@ What it writes:
   ```
 
 - **Not included:** token secret files referenced by `server.yaml`
-  `tokens:` (they live in your secret store) and `ui-session-key`.
+  `tokens:` (they live in your secret store). A `ui-session-key` file
+  left by packyard before v1.2.1 is unused and can be deleted.
 
 In Docker, run it inside the container with the backup target mounted:
 

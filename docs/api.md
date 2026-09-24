@@ -141,6 +141,10 @@ Existing `/ui/` sessions using a revoked token become anonymous on
 the very next request (packyard does not cache identity — every
 request hits the tokens table).
 
+The dashboard only accepts `admin` tokens. Logging in creates a
+server-side session (24 hours); the cookie holds a random session id,
+never the token, and logging out deletes the session.
+
 ### JSON read surface
 
 All require the `admin` scope, except `/api/v1/cells`, which any valid token can read.

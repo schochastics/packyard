@@ -112,6 +112,28 @@ func Lookup(ctx context.Context, db *sql.DB, plaintext string) (Identity, error)
 	}, nil
 }
 
+// LookupByID resolves a token row by id, for callers that hold a
+// reference to a token rather than its plaintext (UI sessions).
+// Revoked tokens return ErrTokenNotFound, as in [Lookup].
+func LookupByID(ctx context.Context, db *sql.DB, id int64) (Identity, error) {
+	var (
+		label sql.NullString
+		csv   string
+		revAt sql.NullString
+	)
+	err := db.QueryRowContext(ctx, `
+		SELECT label, scopes_csv, revoked_at FROM tokens WHERE id = ?
+	`, id).Scan(&label, &csv, &revAt)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && revAt.Valid) {
+		return Identity{}, ErrTokenNotFound
+	}
+	if err != nil {
+		return Identity{}, fmt.Errorf("auth: lookup token: %w", err)
+	}
+	touchLastUsed(ctx, db, id)
+	return Identity{TokenID: id, Label: label.String, Scopes: ParseScopes(csv)}, nil
+}
+
 // lastUsedInterval bounds how often touchLastUsed writes per token.
 // Every authenticated request (each PACKAGES and tarball GET of an R
 // client with a read token) would otherwise be a SQLite write, all

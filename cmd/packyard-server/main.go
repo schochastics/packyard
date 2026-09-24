@@ -5,12 +5,10 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -357,11 +355,6 @@ func runServe(cfg *config.ServerConfig) error {
 		slog.Info("synced config tokens", "created", res.Created, "updated", res.Updated, "revoked", res.Revoked)
 	}
 
-	uiKey, err := loadOrCreateUISessionKey(cfg.DataDir)
-	if err != nil {
-		return fmt.Errorf("ui session key: %w", err)
-	}
-
 	deps := api.Deps{
 		DB:              database,
 		CAS:             casStore,
@@ -370,7 +363,7 @@ func runServe(cfg *config.ServerConfig) error {
 		Channels:        channels,
 		Server:          cfg,
 		Metrics:         metrics.New(),
-		UISessionKey:    uiKey,
+		EnableUI:        true,
 		UISecureCookies: cfg.SecureCookies(),
 		PublicURL:       cfg.PublicURL,
 		TrustedProxies:  cfg.TrustedProxyPrefixes(),
@@ -482,30 +475,6 @@ func runHealthcheck(cfg *config.ServerConfig, url string) error {
 		return fmt.Errorf("%s: status %d", url, resp.StatusCode)
 	}
 	return nil
-}
-
-// loadOrCreateUISessionKey returns the HMAC key used to sign /ui/
-// session cookies. On first run the key is generated (32 random bytes)
-// and persisted to <dataDir>/ui-session-key with 0o600 perms so a
-// restart doesn't invalidate every logged-in operator.
-func loadOrCreateUISessionKey(dataDir string) ([]byte, error) {
-	path := filepath.Join(dataDir, "ui-session-key")
-	b, err := os.ReadFile(path)
-	if err == nil && len(b) >= 32 {
-		return b, nil
-	}
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-
-	key := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, key); err != nil {
-		return nil, fmt.Errorf("generate key: %w", err)
-	}
-	if err := os.WriteFile(path, key, 0o600); err != nil {
-		return nil, fmt.Errorf("write %s: %w", path, err)
-	}
-	return key, nil
 }
 
 // validateUpstreamCells cross-checks proxy channels' binary_urls maps

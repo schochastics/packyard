@@ -20,7 +20,6 @@ import (
 type Deps struct {
 	DB            *db.DB
 	Matrix        *config.MatrixConfig // optional; /ui/cells renders empty if nil
-	SessionKey    []byte               // HMAC key for the session cookie; must be non-empty
 	SecureCookies bool                 // set Secure flag on Set-Cookie (production)
 	PublicURL     string               // external base URL for copy-paste snippets; "" = derive from the request
 }
@@ -36,8 +35,8 @@ type Handler struct {
 // NewHandler parses the embedded templates and wires routes on a new
 // mux. The returned http.Handler can be mounted under any path prefix.
 func NewHandler(deps Deps) (*Handler, error) {
-	if len(deps.SessionKey) == 0 {
-		return nil, errors.New("ui: SessionKey is required")
+	if deps.DB == nil {
+		return nil, errors.New("ui: DB is required")
 	}
 
 	tpl, err := parseTemplates()
@@ -69,7 +68,40 @@ func NewHandler(deps Deps) (*Handler, error) {
 
 // ServeHTTP dispatches to the internal routes.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// The dashboard is never meant to be framed, and pages carry
+	// operator data: forbid framing (clickjacking) and cross-origin
+	// referrers.
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Content-Security-Policy", "frame-ancestors 'none'")
+	w.Header().Set("Referrer-Policy", "same-origin")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.Method == http.MethodPost && crossOrigin(r) {
+		http.Error(w, "cross-origin form submission refused", http.StatusForbidden)
+		return
+	}
 	h.mux.ServeHTTP(w, r)
+}
+
+// crossOrigin reports whether a state-changing request came from
+// another site (login CSRF, forced logout). Browsers send
+// Sec-Fetch-Site and/or Origin on form POSTs; requests with neither
+// (curl, old clients) are allowed, since the attack needs a browser.
+func crossOrigin(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "cross-site", "same-site":
+		return true
+	case "same-origin", "none":
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return true
+	}
+	return u.Host != r.Host
 }
 
 // parseTemplates loads every embedded HTML file into a single template
@@ -373,7 +405,11 @@ func (h *Handler) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	value := signSessionCookie(tok, h.deps.SessionKey)
+	value, expires, err := h.createSession(r.Context(), id.TokenID)
+	if err != nil {
+		h.renderError(w, r, err)
+		return
+	}
 	//nolint:gosec // G124: Secure is deliberately config-driven (off only for plain-HTTP dev setups); HttpOnly and SameSite are set.
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
@@ -382,12 +418,13 @@ func (h *Handler) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   h.deps.SecureCookies,
 		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(defaultSessionTTL),
+		Expires:  expires,
 	})
 	http.Redirect(w, r, "/ui/", http.StatusFound)
 }
 
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
+	h.deleteSession(r)
 	//nolint:gosec // G124: Secure is deliberately config-driven (off only for plain-HTTP dev setups); HttpOnly and SameSite are set.
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
@@ -399,26 +436,6 @@ func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 	})
 	http.Redirect(w, r, "/ui/login", http.StatusFound)
-}
-
-// sessionIdentity reads the cookie, verifies the signature, and resolves
-// the token to a DB row. Returns (id, true) on success; (zero, false)
-// for missing, tampered, or revoked sessions, and for tokens that lost
-// the admin scope since login.
-func (h *Handler) sessionIdentity(r *http.Request) (auth.Identity, bool) {
-	c, err := r.Cookie(sessionCookieName)
-	if err != nil {
-		return auth.Identity{}, false
-	}
-	tok, err := verifySessionCookie(c.Value, h.deps.SessionKey)
-	if err != nil {
-		return auth.Identity{}, false
-	}
-	id, err := auth.Lookup(r.Context(), h.deps.DB.DB, tok)
-	if err != nil || !id.Scopes.Has(auth.ScopeAdmin) {
-		return auth.Identity{}, false
-	}
-	return id, true
 }
 
 func redirectLogin(w http.ResponseWriter, r *http.Request) {
