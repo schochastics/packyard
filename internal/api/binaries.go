@@ -98,16 +98,7 @@ func handleAttachBinary(deps Deps) http.HandlerFunc {
 		if !res.AlreadyExisted && deps.Index != nil {
 			deps.Index.InvalidateChannel(channel)
 		}
-		if deps.Metrics != nil {
-			result := "binary_attached"
-			switch {
-			case res.AlreadyExisted:
-				result = "binary_already_existed"
-			case res.Overwritten:
-				result = "binary_overwrote"
-			}
-			deps.Metrics.PublishTotal.WithLabelValues(channel, result).Inc()
-		}
+		recordAttachMetric(deps, channel, res)
 		refreshCASBytes(r.Context(), deps)
 
 		status := http.StatusCreated
@@ -262,4 +253,20 @@ func handleListMissingBinaries(deps Deps) http.HandlerFunc {
 		}
 		writeJSON(w, r, http.StatusOK, ListMissingBinariesResponse{Channel: channel, Missing: missing})
 	}
+}
+
+// recordAttachMetric bumps packyard_publish_total for a binary attach,
+// from the HTTP endpoint and the bundle importer alike.
+func recordAttachMetric(deps Deps, channel string, res *store.AttachResult) {
+	if deps.Metrics == nil {
+		return
+	}
+	result := "binary_attached"
+	switch {
+	case res.AlreadyExisted:
+		result = "binary_already_existed"
+	case res.Overwritten:
+		result = "binary_overwrote"
+	}
+	deps.Metrics.PublishTotal.WithLabelValues(channel, result).Inc()
 }

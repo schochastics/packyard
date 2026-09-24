@@ -52,11 +52,9 @@ func validVersion(v string) bool {
 // "source" and "binaries[].part" name other multipart parts. Fields
 // not listed are rejected (DisallowUnknownFields) so typos surface.
 type Manifest struct {
-	Source             string            `json:"source"`
-	DescriptionVersion string            `json:"description_version,omitempty"`
-	Binaries           []ManifestBinary  `json:"binaries,omitempty"`
-	PublishedBy        string            `json:"-"` // populated from token label
-	Extra              map[string]string `json:"-"`
+	Source             string           `json:"source"`
+	DescriptionVersion string           `json:"description_version,omitempty"`
+	Binaries           []ManifestBinary `json:"binaries,omitempty"`
 }
 
 // ManifestBinary describes a single binary in a publish manifest.
@@ -148,7 +146,6 @@ func handlePublish(deps Deps) http.HandlerFunc {
 		}
 
 		id, _ := IdentityFromContext(r.Context())
-		manifest.PublishedBy = id.Label
 
 		resp, herr := publishViaStore(r.Context(), storeService(deps), channel, name, version, policy, manifest, parts, id.Label)
 		if herr != nil {

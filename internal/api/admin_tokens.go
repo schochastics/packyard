@@ -88,7 +88,14 @@ func handleCreateToken(deps Deps) http.HandlerFunc {
 		}
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 
-		res, err := deps.DB.ExecContext(r.Context(), `
+		// The token row and its audit event commit together.
+		tx, err := deps.DB.BeginTx(r.Context(), nil)
+		if err != nil {
+			internalErr("begin tx", err).write(w, r)
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+		res, err := tx.ExecContext(r.Context(), `
 			INSERT INTO tokens(token_sha256, scopes_csv, label, created_at)
 			VALUES (?, ?, ?, ?)
 		`, auth.HashToken(plaintext), csv, req.Label, now)
@@ -101,11 +108,17 @@ func handleCreateToken(deps Deps) http.HandlerFunc {
 			internalErr("last insert id", err).write(w, r)
 			return
 		}
-
-		_, _ = deps.DB.ExecContext(r.Context(), `
+		if _, err := tx.ExecContext(r.Context(), `
 			INSERT INTO events(at, type, actor, note)
 			VALUES (?, 'token_create', ?, ?)
-		`, now, labelFromContext(r.Context()), req.Label)
+		`, now, labelFromContext(r.Context()), req.Label); err != nil {
+			internalErr("token event", err).write(w, r)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			internalErr("commit token", err).write(w, r)
+			return
+		}
 
 		if deps.Metrics != nil {
 			deps.Metrics.TokenCreateTotal.Inc()
@@ -204,7 +217,13 @@ func handleRevokeToken(deps Deps) http.HandlerFunc {
 		}
 
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		res, err := deps.DB.ExecContext(r.Context(), `
+		tx, err := deps.DB.BeginTx(r.Context(), nil)
+		if err != nil {
+			internalErr("begin tx", err).write(w, r)
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+		res, err := tx.ExecContext(r.Context(), `
 			UPDATE tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?
 		`, now, id)
 		if err != nil {
@@ -222,10 +241,17 @@ func handleRevokeToken(deps Deps) http.HandlerFunc {
 			return
 		}
 
-		_, _ = deps.DB.ExecContext(r.Context(), `
+		if _, err := tx.ExecContext(r.Context(), `
 			INSERT INTO events(at, type, actor, note)
 			VALUES (?, 'token_revoke', ?, ?)
-		`, now, labelFromContext(r.Context()), strconv.FormatInt(id, 10))
+		`, now, labelFromContext(r.Context()), strconv.FormatInt(id, 10)); err != nil {
+			internalErr("token event", err).write(w, r)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			internalErr("commit revoke", err).write(w, r)
+			return
+		}
 
 		if deps.Metrics != nil {
 			deps.Metrics.TokenRevokeTotal.Inc()

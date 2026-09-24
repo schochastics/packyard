@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+
+	"github.com/schochastics/packyard/internal/version"
 )
 
 // HealthResponse is the body of GET /health. Subsystem fields let
@@ -46,6 +48,7 @@ func handleHealth(deps Deps) http.HandlerFunc {
 
 		writeJSON(w, r, status, HealthResponse{
 			Status:     overall,
+			Version:    version.Version,
 			Subsystems: subs,
 		})
 	}

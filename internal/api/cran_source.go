@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/schochastics/packyard/internal/store"
 	"github.com/schochastics/packyard/internal/upstream"
@@ -387,10 +388,11 @@ func lookupSourceBlob(ctx context.Context, db *sql.DB, channel, name, version st
 	return sum, size, nil
 }
 
-// serveBlob streams a CAS blob into the response. The size comes from
-// the DB (authoritative) rather than stat on the file, so a truncated
-// blob on disk surfaces as a short response rather than a silent size
-// mismatch.
+// serveBlob streams a CAS blob into the response. Blobs are files, so
+// http.ServeContent handles HEAD, Range and If-None-Match (the ETag is
+// the content hash, so it never changes for a given URL's bytes).
+// Should the reader ever not be seekable, the blob is streamed with
+// the DB's size, so a truncated file shows up as a short response.
 func serveBlob(w http.ResponseWriter, r *http.Request, deps Deps, sum string, size int64, contentType string) {
 	rc, err := deps.CAS.Read(sum)
 	if err != nil {
@@ -399,23 +401,24 @@ func serveBlob(w http.ResponseWriter, r *http.Request, deps Deps, sum string, si
 			// operator problem, not a client error.
 			writeError(w, r, http.StatusInternalServerError,
 				CodeInternal, "blob missing from CAS",
-				"DB references a sha256 with no matching file; run admin gc to diagnose")
+				"DB references a sha256 with no matching file; run admin reindex to diagnose")
 			return
 		}
-		writeError(w, r, http.StatusInternalServerError,
-			CodeInternal, "cas read: "+err.Error(), "")
+		internalErr("cas read", err).write(w, r)
 		return
 	}
 	defer func() { _ = rc.Close() }()
 
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.Header().Set("ETag", `"`+sum+`"`)
-	if _, err := io.Copy(w, rc); err != nil {
-		// Client probably closed the connection mid-download. Not a
-		// server error — just note it; the status was already written.
-		_ = err
+	if rs, ok := rc.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, "", time.Time{}, rs)
+		return
 	}
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	// A copy error means the client went away mid-download; the status
+	// is already written, so there is nothing to report.
+	_, _ = io.Copy(w, rc)
 }
 
 // loadSourcePackages is a thin wrapper over Index.GetSource that

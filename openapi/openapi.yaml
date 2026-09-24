@@ -12,7 +12,7 @@ info:
 
     See https://github.com/schochastics/packyard for docs and the
     implementation plan.
-  version: 0.1.0
+  version: "1.2"
   license:
     name: MIT
     url: https://opensource.org/licenses/MIT
@@ -23,9 +23,9 @@ servers:
   - url: https://packyard.example.com
     description: Production deployment (example)
 
-# Every route under /api/v1 requires a bearer token except /health. The
-# CRAN-protocol routes are documented with their own security override
-# in B2-C3 so this default matches the "admin/CI path" shape.
+# Every route under /api/v1 requires a bearer token except the spec
+# itself (openapi.json/.yaml). /health, /metrics and the CRAN-protocol
+# routes carry their own security override.
 security:
   - bearerAuth: []
 
@@ -589,7 +589,7 @@ paths:
   /health:
     get:
       summary: Liveness probe
-      description: Pings the DB. Does not require auth so load balancers can poll anonymously.
+      description: Probes the DB, CAS and matrix config. Does not require auth so load balancers can poll anonymously.
       operationId: health
       tags: [meta]
       security: []
@@ -604,6 +604,48 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorBody' }
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: |
+        Prometheus text exposition. Public on the main listener, or served
+        only on `metrics_listen` when that is configured.
+      operationId: metrics
+      tags: [meta]
+      security: []
+      responses:
+        '200':
+          description: Metrics in the Prometheus text format.
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/openapi.json:
+    get:
+      summary: This OpenAPI document as JSON
+      operationId: openapiJSON
+      tags: [meta]
+      security: []
+      responses:
+        '200':
+          description: The OpenAPI 3 document.
+          content:
+            application/json:
+              schema: { type: object }
+
+  /api/v1/openapi.yaml:
+    get:
+      summary: This OpenAPI document as YAML
+      operationId: openapiYAML
+      tags: [meta]
+      security: []
+      responses:
+        '200':
+          description: The OpenAPI 3 document.
+          content:
+            application/yaml:
+              schema: { type: string }
 
   # ---- Admin / Tokens --------------------------------------------------
   /api/v1/admin/tokens:

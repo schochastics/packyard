@@ -14,6 +14,7 @@ package auth
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -65,14 +66,7 @@ func (s ScopeSet) CSV() string {
 	for k := range s {
 		keys = append(keys, k)
 	}
-	// Sort in place via a small bubble (len is always tiny).
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[j] < keys[i] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
+	slices.Sort(keys)
 	return strings.Join(keys, ",")
 }
 
@@ -83,15 +77,12 @@ func (s ScopeSet) Has(required string) bool {
 	if _, ok := s[required]; ok {
 		return true
 	}
-	verb, target, ok := strings.Cut(required, ":")
+	verb, _, ok := strings.Cut(required, ":")
 	if !ok {
 		// A scope with no colon (e.g. ScopeAdmin) either matches
 		// exactly (handled above) or doesn't match at all.
 		return false
 	}
-	_ = target
-	if _, ok := s[verb+":"+Wildcard]; ok {
-		return true
-	}
-	return false
+	_, ok = s[verb+":"+Wildcard]
+	return ok
 }
