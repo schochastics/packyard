@@ -66,7 +66,7 @@ jobs:
           cache: true
 
       - name: Install vacuum
-        run: go install github.com/daveshanley/vacuum@latest
+        run: go install github.com/daveshanley/vacuum@v0.29.0 # keep in sync with VACUUM_VERSION in the Makefile
 
       # Run in errors-only mode: stylistic warnings (missing examples,
       # snake_case properties, etc.) are tracked separately and don't
