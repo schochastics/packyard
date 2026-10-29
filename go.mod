@@ -3,7 +3,7 @@ module github.com/schochastics/packyard
 go 1.26.0
 
 require (
-	github.com/getkin/kin-openapi v0.149.0
+	github.com/getkin/kin-openapi v0.152.0
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.24.1
 	golang.org/x/sync v0.23.0
